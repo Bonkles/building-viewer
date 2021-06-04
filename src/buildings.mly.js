@@ -3,18 +3,21 @@ import {
     geodeticToEnu,
     Viewer,
     CameraControls
-  } from "../node_modules/mapillary-js/dist/mapillary.module.js";
-  import {
-    AmbientLight,
-    AnimationMixer,
-    Camera,
-    Clock,
-    PointLight,
-    Scene,
-    WebGLRenderer,
-  } from "../node_modules/three/build/three.module.js";
-  import { GLTFLoader } from "../node_modules/three/examples/jsm/loaders/GLTFLoader.js";
-  import { ColladaLoader } from "../node_modules/three/examples/jsm/loaders/ColladaLoader.js";
+} from "../node_modules/mapillary-js/dist/mapillary.module.js";
+
+import {
+  AmbientLight,
+  AnimationMixer,
+  Camera,
+  Clock,
+  PointLight,
+  Scene,
+  WebGLRenderer,
+} from "../node_modules/three/build/three.module.js";
+
+import { GLTFLoader }     from "../node_modules/three/examples/jsm/loaders/GLTFLoader.js";
+import { ColladaLoader }  from "../node_modules/three/examples/jsm/loaders/ColladaLoader.js";
+import UnlitMaterial      from "./UnlitMaterial.js";
 
   class BostonBuildingRenderer {
     constructor() {
@@ -54,8 +57,28 @@ import {
         // "../resources/collada/boston-m4/BOS3D_M4_Buildings_20180825.gltf",
         "../resources/collada/boston-l5/BOS3D_L5_Buildings_20180825.gltf",
         (gltf) => {
-          const buildings = gltf.scene;
-//          const animations = buildings.animations;
+          const buildings = gltf.scene.children[ 0 ]; // Skip Group Object, Get Root 3D Object
+
+          //#region Replace Material for all the meshes
+          // TODO: Better to create recursion to make sure to get all meshes, but this
+          // file seems to follow the pattern of each Object3D has 3 Mesh Children          
+          let o, m, meshCount = 0, buildCount=0;
+          let mat = UnlitMaterial( "cyan", true ); // Need to use lowpoly mode, mesh doesn't have no
+          for( o of buildings.children ){
+            if( o.type != "Object3D" ) continue; // There is a Line Object that I dont want to override.
+            
+            buildCount++;
+            for( m of o.children ){
+              if( m.type != "mesh" )
+              m.material = mat;
+              meshCount++;
+            }
+          }
+          console.log( `Total Buildings ${buildCount}, Total Meshes : ${meshCount}` );
+          //#endregion ////////////////////////////////////////////////////
+
+
+//        const animations = buildings.animations;
 
           const [e, n, u] = geodeticToEnu(
             geoPosition.lng,
@@ -65,9 +88,11 @@ import {
             reference.lat,
             reference.alt
           );
-         buildings.position.set(e, n, u);
-        //  buildings.position.set(0, 0, 0);
-         buildings.rotation.set(Math.PI/2, 0, 0 );
+          
+          buildings.position.set(e, n, u);
+          // buildings.position.set(0, 0, 0);
+          // buildings.rotation.set(Math.PI/2, 0, 0 );
+          buildings.rotation.set( 0, 0, 0 ); // Root 3D Object already has Rotation set to make Z up, reset it so Y is up.
 
           scene.add(buildings);
 
