@@ -1,0 +1,51 @@
+<!DOCTYPE html><html><head><title></title></head><body><script type="module">
+
+import Starter, { THREE }   from "../src/starter.js";
+import UnlitMaterial        from "../src/UnlitMaterial.js";
+import GltfUtil             from "../src/lib/GltfUtil.js";
+
+let App;
+window.addEventListener( "load", _=>{
+    App = new Starter( { webgl2:false, grid:false } );
+	App.set_camera( -55, 45, 1500 ).render();
+
+    App.add( new THREE.GridHelper( 1000, 50, 0x0c610c, 0x555555 ) );
+
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    init();
+
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+    btnOnClick( "btnTop", _=>App.set_camera( 0, 90, 1500 ) );
+    btnOnClick( "btnFront", _=>App.set_camera( 0, 0, 1000 ) );
+    btnOnClick( "btnSide", _=>App.set_camera( 90, 0, 1000 ) );
+    btnOnClick( "btnAngle", _=>App.set_camera( -55, 35, 800 ) );
+    btnOnClick( "btnZoom", _=>App.set_camera( -55, 25, 300 ) );
+});
+
+async function init(){
+    let [ json, bin ] = await GltfUtil.fetch_files( "../resources/BOS3D_L5/BOS3D_L5_OneMesh" );
+
+    let mat  = UnlitMaterial( "cyan", true );
+    mat.side = THREE.DoubleSide; // Disable backface culling, Triangle Winding is a lil messed up on several buildings.
+
+    let mesh = GltfUtil.pull_meshes( json, bin, mat );
+    App.add( mesh );
+}
+
+function btnOnClick( id, fn ){
+    let btn = document.getElementById( id );
+    btn.addEventListener( "click", fn );
+}
+</script>
+
+<div style="position:fixed; top:10px; left:10px; width:150px; display:flex; flex-direction:column;">
+    <button id="btnTop">TOP</button>
+    <button id="btnFront">FRONT</button>
+    <button id="btnSide">SIDE</button>
+    <button id="btnAngle">ANGLE</button>
+    <button id="btnZoom">ZOOM</button>
+</div>
+
+</body></html>
