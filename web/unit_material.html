@@ -1,0 +1,28 @@
+<!DOCTYPE html><html><head><title></title></head><body><script type="module">
+
+import Starter, { THREE }   from "../src/starter.js";
+import UnlitMaterial        from "../src/UnlitMaterial.js";
+
+let App;
+window.addEventListener( "load", _=>{
+	//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	App = new Starter( { webgl2:false, grid:true } );
+	App.set_camera( 0, 20, 6 ).render();
+
+    let geo, mesh, mat = UnlitMaterial();//  new THREE.MeshBasicMaterial( {color: 0x00ff00} );
+    
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    geo  = new THREE.BoxGeometry( 1, 1, 1 );
+    mesh = new THREE.Mesh( geo, mat );
+    mesh.position.y = 0.5;
+    App.add( mesh );
+    
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    geo  = new THREE.TorusKnotGeometry( 0.4, 0.15, 100, 8 );
+    mesh = new THREE.Mesh( geo, mat );
+    mesh.position.y = 0.7;
+    mesh.position.x = 2;
+    App.add( mesh );
+});
+
+</script></body></html>
