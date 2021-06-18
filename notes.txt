@@ -1,0 +1,19 @@
+3D Models of L5 tile of Boston
+http://www.bostonplans.org/3d-data-maps/3d-smart-model/3d-data-download
+
+Mapillary Example to use as a starting point
+https://mapillary.github.io/mapillary-js/examples/viewer-from-map/
+
+
+Center Position of Boston L5
+https://mapwith.ai/rapid#background=MassGIS-2019-Orthos&disable_features=points,indoor,landuse,boundaries,water,pistes,power,past_future,others&id=w8636684&map=17.00/42.35901/-71.05956
+
+Mesh Converts
+https://github.com/KhronosGroup/COLLADA2GLTF
+https://anyconv.com/dae-to-obj-converter/
+https://www.meshconvert.com/
+
+
+
+EXTRA
+https://github.com/IRCSS/3D-Moebius-Transformations-Vertex-shader-in-Unity-3D

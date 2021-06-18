@@ -4,16 +4,19 @@ import Starter, { THREE }   from "../src/starter.js";
 import UnlitMaterial        from "../src/UnlitMaterial.js";
 import GltfUtil             from "../src/lib/GltfUtil.js";
 
+import { GLTFLoader }       from "../node_modules/three/examples/jsm/loaders/GLTFLoader.js";
+
 let App;
 window.addEventListener( "load", _=>{
-    App = new Starter( { webgl2:false, grid:false } );
+    App = new Starter( { webgl2:true, grid:false } );
 	App.set_camera( -55, 45, 1500 ).render();
 
     App.add( new THREE.GridHelper( 1000, 50, 0x0c610c, 0x555555 ) );
 
     //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    init();
+    loadBuildings();
+    loadTerrain();
 
     //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -22,15 +25,33 @@ window.addEventListener( "load", _=>{
     btnOnClick( "btnSide", _=>App.set_camera( 90, 0, 1000 ) );
     btnOnClick( "btnAngle", _=>App.set_camera( -55, 35, 800 ) );
     btnOnClick( "btnZoom", _=>App.set_camera( -55, 25, 300 ) );
+    btnOnClick( "btnStreet", _=>App.set_camera( 130, 13, 100 ) );
 });
 
-async function init(){
+async function loadBuildings(){
     let [ json, bin ] = await GltfUtil.fetch_files( "../resources/BOS3D_L5/BOS3D_L5_OneMesh" );
 
     let mat  = UnlitMaterial( "cyan", true );
     mat.side = THREE.DoubleSide; // Disable backface culling, Triangle Winding is a lil messed up on several buildings.
 
     let mesh = GltfUtil.pull_meshes( json, bin, mat );
+    App.add( mesh );
+}
+
+async function loadTerrain(){
+    let [ [json, bin], img ] = await Promise.all([
+        GltfUtil.fetch_files( "../resources/BOS3D_L5/BOS3D_L5_Terrain" ),
+        fetch( "../resources/BOS3D_L5/BOS3D_L5_Terrain.png" ).then( r=>r.blob() ).then( b=>Starter.ImgBlobPromise( b ) ),
+    ]);     
+
+    let tex = new THREE.Texture( img );
+    tex.needsUpdate = true;
+    tex.flipY       = false;
+
+    let mat = new THREE.MeshPhongMaterial( { map: tex } ); //{ map: tex } { color: 0x049EF4 }
+    
+    let mesh = GltfUtil.pull_meshes( json, bin, mat );
+    //mesh.rotation.set( 0, 270 * Math.PI/180, 0 );
     App.add( mesh );
 }
 
@@ -46,6 +67,7 @@ function btnOnClick( id, fn ){
     <button id="btnSide">SIDE</button>
     <button id="btnAngle">ANGLE</button>
     <button id="btnZoom">ZOOM</button>
+    <button id="btnStreet">STREET</button>
 </div>
 
 </body></html>
