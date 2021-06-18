@@ -1,0 +1,80 @@
+<!DOCTYPE html><html><head><title></title>
+    <link href="../node_modules/mapillary-js/dist/mapillary.css" rel="stylesheet" />
+    <style> body, html { margin: 0px; padding: 0px; overscroll-behavior: none; } </style>
+</head><body><script type="module">
+
+//#region IMPORTS
+import Global from "../src/global.js";
+import {
+    enuToGeodetic,
+    geodeticToEnu,
+    Viewer,
+    CameraControls,
+    RenderMode,
+} from "../node_modules/mapillary-js/dist/mapillary.module.js";
+//#endregion
+
+
+let viewer;
+window.addEventListener( "load", _=>{
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // CREATE VIEWER
+    const opt = {
+        // required options
+        accessToken     : Global.MAPILLARY_TOKEN,
+        container       : mkContainer(),
+
+        // optional options
+        //imageId       : IMG_ID,
+        //component       : { cover: false },
+        //cameraControls  : CameraControls.Street,
+        //trackResize     : true,
+        //imageTiling     : false,  // Loads in better images when zoomed in if set to true.
+        //renderMode      : RenderMode.Letterbox,
+        //combinedPanning : false,
+    };
+
+    viewer = new Viewer( opt );
+
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // EVENTS
+    viewer.on( "load", evt=>console.log( "on", event.type ) );
+    
+    viewer.on( "position", async (evt)=>{
+        const viewer = evt.target;
+        const pos    = await viewer.getPosition();
+        const img    = await viewer.getImage();
+        console.log( `onPosition - id: ${img.id}, lng: ${pos.lng}, lat: ${pos.lat}` );
+    });
+
+    viewer.on( "bearing", evt=>{
+        console.log( `${evt.type} - bearing: ${evt.bearing.toFixed( 2 )} degrees` );
+    });
+
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // SET POSITION
+    let IMG_ID  = "3748064795322267";
+    //IMG_ID = "178975760792906";
+
+    viewer
+        .moveTo( IMG_ID )
+        .then(
+            img => console.log( "Eep", img ),
+            err => console.error( "Eep", err ),
+        );
+        
+});
+
+function mkContainer(  ){
+    let elm = document.createElement( "div" );
+
+    elm.style.width     = "100vw";
+    elm.style.height    = "100vh";
+    elm.style.display   = "block";
+    
+    document.body.appendChild( elm );
+    return elm;
+}
+
+
+</script></body></html>

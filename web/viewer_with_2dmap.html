@@ -1,0 +1,210 @@
+<!DOCTYPE html><html><head><title></title>
+    <link href="../node_modules/mapillary-js/dist/mapillary.css" rel="stylesheet" />
+    <link href="../node_modules/mapbox-gl/dist/mapbox-gl.css" rel="stylesheet" />
+    <script src="../node_modules/mapbox-gl/dist/mapbox-gl.js"></script>
+    <style> body, html { margin: 0px; padding: 0px; overscroll-behavior: none; } </style>
+</head><body><script type="module">
+
+//#region IMPORTS
+import Global   from "../src/global.js";
+import {
+    enuToGeodetic,
+    geodeticToEnu,
+    Viewer,
+    CameraControls,
+    RenderMode,
+} from "../node_modules/mapillary-js/dist/mapillary.module.js";
+//#endregion
+
+// #region MAIN
+
+const START_LNGLAT = [ -122.34095574541155, 47.61238810988727 ];
+
+let streetView, mapView;
+
+window.addEventListener( "load", _=>{
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    let panes   = mkPanes();
+    mapView     = new MapView( panes.center );
+    streetView  = new StreetView( panes.left );
+});
+
+
+function mkPanes() {
+  const container       = document.body;
+  const boundingRect    = container.getBoundingClientRect();
+  const height          = `calc(100vh - ${boundingRect.top}px)`;
+
+  const paneLeft = document.createElement('div');
+  paneLeft.style.position    = 'absolute';
+  paneLeft.style.height      = height;
+  paneLeft.style.width       = '33%';
+
+  const paneCenter = document.createElement('div');
+  paneCenter.style.position   = 'absolute';
+  paneCenter.style.left       = '33%';
+  paneCenter.style.height     = height;
+  paneCenter.style.width      = '33%';
+  paneCenter.style.marginLeft = '2px';
+
+  const paneRight = document.createElement('div');
+  paneRight.style.position   = 'absolute';
+  paneRight.style.right      = '0px';
+  paneRight.style.height     = height;
+  paneRight.style.width      = '34%';
+  paneRight.style.marginLeft = '2px';
+  paneRight.innerHTML        = "X";
+
+  container.appendChild( paneLeft );
+  container.appendChild( paneCenter );
+  container.appendChild( paneRight );
+
+  return { left:paneLeft, center:paneCenter, right:paneRight };
+}
+
+// #endregion /////////////////////////////////////////////////////////////////////////////
+
+
+class StreetView{
+    constructor( parentElm ){
+        this.view = new Viewer({
+            accessToken     : Global.MAPILLARY_TOKEN,
+            container       : parentElm,
+        } );
+
+        this.view.on( "load",       this.onLoad.bind( this ) );
+        this.view.on( "image",      this.onImage.bind( this ) );
+        this.view.on( "position",   this.onPosition.bind( this ) );
+    }
+
+    // #region EVENTS
+    async onLoad(){
+        //const image = await this.view.getImage();
+        //onImage( image );
+        //await onPosition();
+        console.log( "[ Mapillary Loaded ]" );
+    }
+
+    onImage( evt ){
+        const image  = evt.image;
+        const lngLat = [ image.lngLat.lng, image.lngLat.lat ];
+        if( !mapView.view.getBounds().contains( lngLat ) ) mapView.view.setCenter( lngLat );
+    }
+
+    async onPosition(){
+        const position  = await this.view.getPosition();
+        const pos       = [ position.lng, position.lat ];
+        mapView.moveMarker( pos );
+    }
+    // #endregion
+
+    // #region METHODS
+    moveTo( imageId ){
+        this.view
+            .moveTo( imageId )
+            .catch( err=>console.warn( err ) );
+    }
+    // #endregion
+}
+
+class MapView{
+    constructor( parentElm ){
+        mapboxgl.accessToken = Global.MAPBOX_TOKEN;
+        
+        this.view = new mapboxgl.Map({
+            container   : parentElm,
+            style       : 'mapbox://styles/mapbox/streets-v11',
+            zoom        : 15,
+            center      : START_LNGLAT,
+        });
+
+        this.marker = this.makeMarker( { radius:8, color:'#f0f' } );
+        this.marker
+            .setLngLat( [ 0, 0 ] ) // Need to set a LngLat, else errors that the data doesn't exist.
+            .addTo( this.view ); 
+
+        this.view.on( "load",   this.onLoad.bind( this ) );
+        this.view.on( "click",  this.onClick.bind( this ) );
+    }
+    
+    // #region EVENTS
+    onLoad(){
+        
+        this.view.addSource( 'images', SOURCE );
+
+        this.view.addLayer({
+            id      : 'images',
+            type    : 'circle',
+            source  : 'images',
+            paint   : {
+                'circle-radius'         : 12,
+                'circle-opacity'        : 0.5,
+                'circle-color'          : '#05CB63',
+                'circle-stroke-color'   : '#05CB63',
+                'circle-stroke-width'   : 2,
+            },
+        });
+
+        //this.marker.addTo( this.view );
+
+        console.log( "[ Mapbox Loaded ]" );
+    }
+
+    onClick( evt ){
+        console.log( "MapView Click", evt );
+
+        const features = this.view.queryRenderedFeatures( evt.point, { layers: ['images'] } );
+        if( !features.length ) return;
+
+        streetView.moveTo( features[ 0 ].properties.imageId );
+    }
+    // #endregion
+
+    // #region METHODS
+    moveMarker( pos ){ this.marker.setLngLat( pos ); }
+
+    makeMarker( options ) {
+        const size      = `${2 * options.radius}px`;
+        const circle    = document.createElement('div');
+
+        circle.style.border             = `3px solid ${options.color}`;
+        circle.style.backgroundColor    = 'rgba(255, 255, 255, 0.6)';
+        circle.style.height             = `${size}`;
+        circle.style.borderRadius       = '50%';
+        circle.style.width              = `${size}`;
+
+        return new mapboxgl.Marker({
+            element             : circle,
+            rotationAlignment   : 'map',
+        });
+    }
+    // #endregion
+}
+
+
+const SOURCE = {
+    type  : 'geojson',
+    data  : {
+        type        : 'FeatureCollection',
+        features    :
+        [
+            {   type        : 'Feature',
+                properties  : { imageId: '1155477361601810' },
+                geometry    : { type: 'Point', coordinates: [-122.34098542513662, 47.61239453991757] } },
+            
+            {   type        : 'Feature',
+                properties  : { imageId: '210400870916819' },
+                geometry    : { type: 'Point', coordinates: [-122.34176298993145, 47.61176596318449] } },
+            
+            {   type        : 'Feature',
+                properties  : { imageId: '1088588038329507' },
+                geometry    : { type: 'Point', coordinates: [-122.34220623895305, 47.61318608939534] } },
+            
+            {   type        : 'Feature',
+                properties  : { imageId: '136571571843306' },
+                geometry    : { type: 'Point', coordinates: [-122.34293313637096, 47.6123862243017] } },
+        ]
+    }
+};
+
+</script></body></html>
