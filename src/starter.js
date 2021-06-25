@@ -26,7 +26,7 @@ class Starter{
 	orbit			= null;
 	render_bind		= this.render.bind( this );
 
-	constructor( config={} ){ // { webgl2:true, grid:true }
+	constructor( config={} ){ // { webgl2:true, grid:true, container:null }
 		//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 		// MAIN
 		this.scene				= new THREE.Scene();
@@ -53,8 +53,21 @@ class Starter{
         this.renderer = new THREE.WebGLRenderer( options );
         this.renderer.setPixelRatio( window.devicePixelRatio );
 		this.renderer.setClearColor( 0x3a3a3a, 1 );
-		this.renderer.setSize( window.innerWidth, window.innerHeight );
-		document.body.appendChild( this.renderer.domElement );
+		
+		if( config.container )	config.container.appendChild( this.renderer.domElement );
+		else 					document.body.appendChild( this.renderer.domElement );
+
+		if( config.fullscreen != false ){
+			this.renderer.setSize( window.innerWidth, window.innerHeight );
+		}else{
+			// Take the size of the parent element.
+			let box = this.renderer.domElement.parentNode.getBoundingClientRect();
+			this.renderer.setSize( box.width , box.height );
+
+			// When changing the canvas size, need to update the Projection Aspect Ratio to render correctly.
+			this.camera.aspect = box.width / box.height;
+			this.camera.updateProjectionMatrix();
+		}
 
 		//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 		// MISC

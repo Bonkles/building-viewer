@@ -1,0 +1,417 @@
+<!DOCTYPE html><html><head><title></title>
+    <link href="../node_modules/mapillary-js/dist/mapillary.css" rel="stylesheet" />
+    <link href="../node_modules/mapbox-gl/dist/mapbox-gl.css" rel="stylesheet" />
+    <script src="../node_modules/mapbox-gl/dist/mapbox-gl.js"></script>
+    <style>
+        body, html { margin: 0px; padding: 0px; overscroll-behavior: none; } 
+        .fillPane { display:flex; flex-direction:row; }
+        .fillPane > * { flex:1 1 auto; }
+
+        .tmpPlane{ position:absolute; width:512px; height:512px; top:0px; left:0px; };
+    </style>
+</head><body><script type="module">
+
+//#region IMPORTS
+import Global   from "../src/global.js";
+import CityView from "../src/CityView.js";
+
+import {
+    enuToGeodetic,
+    geodeticToEnu,
+    Viewer,
+    CameraControls,
+    RenderMode,
+} from "../node_modules/mapillary-js/dist/mapillary.module.js";
+//#endregion
+
+
+// https://docs.mapbox.com/mapbox-gl-js/api/geography/#lnglat#distanceto
+
+
+// #region MAIN
+
+const START_LONLAT = Global.BOSTON_L5_LNGLAT; // [ -122.34095574541155, 47.61238810988727 ];
+const START_MARKER = { lon: -71.06286352246589, lat: 42.361217394511954, imgId: 1397451437286355 };
+
+// https://www.mapillary.com/app/user/pedrosousa?lat=42.361240938977915&lng=-71.06290644839444&z=14.89704826181922
+// https://tiles.mapillary.com/maps/vtp/mly1_public/2/15/-71.06290644839444/42.361240938977915?access_token=MLY|3844773618966746|35a544151b8db9dfe734d33ad4e3f41a
+// {lng: -71.06290644839373, lat: 42.361233300662946}
+let streetView, mapView, cityView, tmpView;
+
+window.addEventListener( "load", _=>{
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    let panes   = mkPanes();
+    streetView  = new StreetView( panes.left );
+    mapView     = new MapView( panes.center );
+    cityView    = new CityView( panes.right );
+
+    tmpView     = new MapViewTexture( panes.temp );
+
+
+    onMarkerMove( START_MARKER.lon, START_MARKER.lat, Markers.All );
+
+    // Setting Mapilary will trigger its onPosition event, which then will
+    // then call the move marker functions for 
+    streetView.moveTo( START_MARKER.imgId );    
+});
+
+// Create Panel Containers
+function mkPanes() {
+  const container       = document.body;
+  const boundingRect    = container.getBoundingClientRect();
+  const height          = `calc(100vh - ${boundingRect.top}px)`;
+
+  const paneLeft = document.createElement('div');
+  paneLeft.style.position    = 'absolute';
+  paneLeft.style.height      = height;
+  paneLeft.style.width       = '33%';
+
+  const paneCenter = document.createElement('div');
+  paneCenter.style.position   = 'absolute';
+  paneCenter.style.left       = '33%';
+  paneCenter.style.height     = height;
+  paneCenter.style.width      = '33%';
+  paneCenter.style.marginLeft = '2px';
+
+  const paneRight = document.createElement('div');
+  paneRight.style.position   = 'absolute';
+  paneRight.style.right      = '0px';
+  paneRight.style.height     = height;
+  paneRight.style.width      = '34%';
+  paneRight.style.marginLeft = '2px';
+  paneRight.className        = "fillPane";
+  //paneRight.innerHTML        = "X";
+
+
+  const paneTemp        = document.createElement('div');
+  paneTemp.className    = "tmpPlane";
+
+  container.appendChild( paneLeft );
+  container.appendChild( paneCenter );
+  container.appendChild( paneRight );
+  container.appendChild( paneTemp );
+
+  return { left:paneLeft, center:paneCenter, right:paneRight, temp:paneTemp };
+}
+
+
+// Hack of a center place to update markers on all 3 panels. Object instances call out these global functions
+// A global dispatcher or interface decoupling would be a better options.
+const Markers = {
+    All     : 7,
+    D2      : 1,
+    D3      : 2,
+    Street  : 4,
+};
+
+function onMarkerMove( lon, lat, marker ){
+    if( marker != Markers.D2 )     mapView.moveMarker( lon, lat );
+    if( marker != Markers.D3 )     cityView.moveMarkerLonLat( lon, lat );
+    //if( marker != Markers.Street ) streetView.moveMarker();
+}
+
+function onMarkerFov( fov, marker = Markers.All ){
+    if( marker != Markers.D2 )     mapView.setMarkerFov( fov );
+}
+
+function onMarkerBearing( b, marker ){
+    if( marker != Markers.D2 )     mapView.setMarkerBearing( b );
+    if( marker != Markers.D3 )     cityView.setMarkerBearing( b );
+}
+// #endregion /////////////////////////////////////////////////////////////////////////////
+
+
+// Manage
+class StreetView{
+    constructor( parentElm ){
+        this.view = new Viewer({
+            accessToken     : Global.MAPILLARY_TOKEN,
+            container       : parentElm,
+        } );
+
+        //https://a.mapillary.com/v3/images?client_id=MLY|3844773618966746|35a544151b8db9dfe734d33ad4e3f41a&closeto=-122.3079,47.6537&radius=200
+
+        this.view.on( "load",       this.onLoad.bind( this ) );
+        //this.view.on( "image",      this.onImage.bind( this ) );
+        this.view.on( "position",   this.onPosition.bind( this ) );
+        //this.view.on( "bearing",    this.onBearing.bind( this ) );
+        this.view.on( "fov",        this.onFov.bind( this ) );
+        this.view.on( "pov",        this.onPov.bind( this ) );
+    }
+
+    // #region EVENTS
+    async onLoad(){
+        //const image = await this.view.getImage();
+        //onImage( image );
+        //await onPosition();
+        console.log( "[ Mapillary Loaded ]" );
+    }
+
+    onImage( evt ){
+        //const image  = evt.image;
+        //const lngLat = [ image.lngLat.lng, image.lngLat.lat ];
+        //if( !mapView.view.getBounds().contains( lngLat ) ) mapView.view.setCenter( lngLat );
+    }
+
+    onBearing( e ){
+        //console.log( "bearing", e );
+        //let deg = ( e.bearing + 180 ) % 360;
+        //cityView.moveMarkerBearing( deg * Math.PI / 180 );
+    }
+
+    async onPosition(){
+        const pos = await this.view.getPosition();
+        onMarkerMove( pos.lng, pos.lat );
+    }
+
+    async onFov( e ){
+        const view = this.view;
+        
+        const viewerContainer = view.getContainer();
+        const height          = viewerContainer.offsetHeight;
+        const width           = viewerContainer.offsetWidth;
+        const aspect          = height === 0 ? 0 : width / height;
+
+        const verticalFov     = Math.PI / 180 * (await view.getFieldOfView());
+        const horizontalFov   = 180 / Math.PI * Math.atan( aspect * Math.tan( 0.5 * verticalFov ) ) * 2;
+
+        onMarkerFov( horizontalFov );
+    }   
+
+    async onPov( e ){
+        const pov = await this.view.getPointOfView();
+        onMarkerBearing( pov.bearing );
+    };
+    // #endregion
+
+    // #region METHODS
+    moveTo( imageId ){
+        this.view
+            .moveTo( imageId )
+            .catch( err=>console.warn( err ) );
+    }
+    // #endregion
+}
+
+// Manage the MapBox View
+class MapView{
+    constructor( parentElm ){
+        mapboxgl.accessToken = Global.MAPBOX_TOKEN;
+        
+        this.view = new mapboxgl.Map({
+            container   : parentElm,
+            style       : 'mapbox://styles/mapbox/streets-v11',
+            zoom        : 15,
+            center      : START_LONLAT,
+        });
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        this.marker = this.makeMarker( { radius:8, color:'#f0f' } );
+        this.marker
+            .setLngLat( [ 0, 0 ] ) // Need to set a LngLat, else errors that the data doesn't exist.
+            .addTo( this.view ); 
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        this.view.on( "load",   this.onLoad.bind( this ) );
+        this.view.on( "click",  this.onClick.bind( this ) );
+    }
+    
+    // #region EVENTS
+    onLoad(){
+        const opacity = 0;
+
+        /* NOTES: To have clickable roads, will need to setup a layer
+        that will load itself up with all the possible positions on the tile
+        that has mapillary images. The layer is invisible by setting opacity
+        to zero, so setting it ot 1 will make it visible. When i user clicks on the
+        map, we quickly query the layer for any images(features) exists within a bounding box area*/
+
+        // Setup Data Source for Mapillary Features Data
+        this.view.addSource( 'mapillary', {
+            // Use any Mapbox-hosted tileset using its tileset id.
+            // Learn more about where to find a tileset id:
+            // https://docs.mapbox.com/help/glossary/tileset-id/
+            type    : 'vector',
+            tiles   : [ 'https://tiles.mapillary.com/maps/vtp/mly1_public/2/{z}/{x}/{y}' ],
+            minzoom : 6,    // Need to set MinMax zoon, else the layer won't display past zoom 13
+            maxzoom : 14,
+        });
+
+        // Setup layer to create/render all the points where data exists on the tile 
+        this.view.addLayer({
+            'id'            : 'mapillary-sequences',
+            'type'          : 'line',
+            'source'        : 'mapillary',
+            'source-layer'  : 'sequence',
+            'layout'        : {
+                'line-join' : 'round',
+                'line-cap'  : 'round',
+            },
+            'paint'         : {
+                'line-color'    : '#05CB63',
+                'line-width'    : 1,
+                'line-opacity'  : opacity,
+            }
+        });
+
+        this.view.addLayer({
+            'id'            : 'mapillary-images',
+            'type'          : 'circle',
+            'source'        : 'mapillary',
+            'source-layer'  : 'image',
+            'paint'         : {
+                'circle-color'   : '#05CB63',
+                'circle-radius'  : 5,
+                'circle-opacity' : opacity,
+            }
+        });
+
+        console.log( "[ Mapbox Loaded ]" );
+    }
+
+    onClick( e ){
+        let pos = e.lngLat;
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Setup Search Bounding Box
+        const range = 5; // Pixel Range
+        const bbox  = [
+            [ e.point.x - range, e.point.y - range ],
+            [ e.point.x + range, e.point.y + range ]
+        ];
+
+        console.log( "Bounding Box", bbox );
+
+        // Test the Data layer for what features exist within the bounding box
+        const features = this.view.queryRenderedFeatures( bbox, { layers: ['mapillary-images'] });
+
+        if( !features || features.length == 0 ){
+            console.warn( "No Features at position" );
+            return;
+        }
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Since there are many features within the bounding box,
+        // lets try to pick the one closest to the actual point selected
+        // on the map.
+        let min   = Infinity,   // Shortest Distance
+            imgID = null,       // Image ID from the shortest distance
+            coord,              // Feature's LngLat Coord
+            delta;              // Distance of feature to clicked point
+
+        for( let i=0; i < features.length; i++ ){
+            coord = features[ i ].geometry.coordinates;
+            delta = (coord[0] - pos.lng)**2 + (coord[1] - pos.lat)**2;  // DistanceSquared, faster for quick checks by avoiding sqrt.
+
+            // New Minimal Check
+            if( delta < min ){
+                min     = delta;
+                imgID   = features[ i ].properties.id;
+            }
+        }
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Grab the first available image and load it in mapillary.
+        //let imgID = features[ 0 ].properties.id;
+        streetView.moveTo( imgID );
+    }
+    // #endregion
+
+    // #region METHODS
+
+    // Update Marker
+    moveMarker( lng, lat ){ this.marker.setLngLat( [lng,lat] ); }
+    setMarkerFov( fov ){    this.markerParts.path.setAttribute( 'd', this.makeArc_DAttrib( fov ) ); }
+    setMarkerBearing( deg ){  this.markerParts.svg.style.transform = this.rotateArc_Transform( deg );  }
+
+    // Translate Data to SVG Data
+    makeArc_DAttrib( fov ){ // Fov in deg
+        const radius    = 45;
+        const centerX   = 50;
+        const centerY   = 50;
+
+        const fovRad    = fov * Math.PI / 180;
+        const arcStart  = -Math.PI/2 - fovRad/2;
+        const arcEnd    = arcStart + fovRad;
+
+        const startX    = centerX + radius * Math.cos(arcStart);
+        const startY    = centerY + radius * Math.sin(arcStart);
+
+        const endX      = centerX + radius * Math.cos(arcEnd);
+        const endY      = centerY + radius * Math.sin(arcEnd);
+
+        const center    = `M ${centerX} ${centerY}`;
+        const line      = `L ${startX} ${startY}`;
+        const arc       = `A ${radius} ${radius} 0 0 1 ${endX} ${endY}`;
+
+        return `${center} ${line} ${arc} Z`;
+    }
+
+    rotateArc_Transform( deg ){ return `rotateZ(${deg}deg)`; }
+
+    makeMarker( options ) { 
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path' );
+        path.setAttribute( 'd', this.makeArc_DAttrib( 90 ) );
+        path.setAttribute( 'fill', 'yellow' );
+        path.setAttribute( 'fill-opacity', '0.5' );
+        path.setAttribute( 'stroke', 'black' );
+        path.setAttribute( 'stroke-width', '1' ) ;
+        path.setAttribute( 'stroke-linejoin', 'round' );
+        
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg' );
+        svg.setAttribute( 'viewBox', '0 0 100 100' );
+        svg.appendChild( path );
+        svg.style.height    = '100%';
+        svg.style.width     = '100%';
+        svg.style.transform = this.rotateArc_Transform( 0 );
+
+        const container = document.createElement('div');
+        container.style.height  = '200px';
+        container.style.width   = '200px';
+        container.appendChild( svg );
+
+        this.markerParts = { path, svg, container };
+
+        return new mapboxgl.Marker({
+            element             : container,
+            rotationAlignment   : 'map',
+            color               : '#FFFFFF',
+        });
+    }
+    
+    // #endregion
+}
+
+// Temporary MapBox view to try to capture the map render into a 3D Texture
+class MapViewTexture{
+    constructor( parentElm ){        
+        this.view = new mapboxgl.Map({
+            container   : parentElm,
+            style       : 'mapbox://styles/mapbox/streets-v11',
+            zoom        : 15,
+            center      : START_LONLAT,
+        });
+
+        this.view.on( "load",   this.onLoad.bind( this ) );
+    }
+
+    onLoad(){
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Capture the first render as a texture to
+        // give to threejs for to render.        
+        this.view.once( "render", _=>{   
+            //console.log( "tiles", this.view.areTilesLoaded() );           
+            cityView.addTexturePlane( this.view.getCanvas() );  // Pass Canvas Over to Save as a Texture
+            setTimeout( _=>{                                    // need a delay to remove map from dom
+                let cont = this.view.getContainer();
+                this.view.remove();                             // Unload Map Viewer
+                cont.parentNode.removeChild( cont );            // Remove Container
+                console.log("Removing Texture View"); 
+            }, 2000 );     // 
+        });
+
+        //this.view.areTilesLoaded()
+    }
+}
+
+</script></body></html>
