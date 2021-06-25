@@ -1,0 +1,218 @@
+<!DOCTYPE html><html><head><title></title></head><body><script type="module">
+
+import Starter, { THREE }   from "../src/starter.js";
+import UnlitMaterial        from "../src/UnlitMaterial.js";
+import earcut               from "../src/lib/earcut.js";
+import PointsMesh           from "../src/lib/PointsMesh.js";
+
+/*
+[[[ Notes ]]]
+
+- For type "Polygon", the "coordinates" member must be an array of LinearRing coordinate arrays. 
+For Polygons with multiple rings, the first must be the exterior ring and any others must be 
+interior rings or holes.
+
+- earcut doesn't do well with 3D points where all the Y values ar zero. Seems like the best
+solution would be to handle the indexing in 2D (XY) then convert it to 3D as X=x, Y=0, Z=Y
+
+- earcut seems to create triangle winding that normal is facing down.
+
+*/
+
+let App, Pnt;
+window.addEventListener( "load", _=>{
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App = new Starter( { webgl2:true, grid:true } );
+	App.set_camera( 0, 45, 8 ).render();
+
+    Pnt = new PointsMesh();
+    App.add( Pnt.mesh );
+
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    let verts   = [ -1,-1,  -1,1,  1,1,  1,-1,  ];
+    let indices = earcut( verts, null, 2 );
+
+    verts       = convert2D_3D( verts ); // Takes points in XY coord system to 3D with Y as UP
+    //draw3DPoints( verts );
+
+    /*
+    let mat     = UnlitMaterial( "cyan", true );
+    //let mat     = new THREE.MeshPhongMaterial( { color:0x00ff00 } );
+    //mat.side    = THREE.DoubleSide;
+    let mesh    = newMesh( mat, indices, verts );
+    App.add( mesh );
+    */
+
+    let geo = extrude( indices, verts );
+    // TODO : norm = createNormals( geo )
+    draw3DPoints( geo.vertices );
+
+    let mat  = UnlitMaterial( "cyan", true );
+    let mesh = newMesh( mat, geo.indices, geo.vertices );
+    App.add( mesh );
+});
+
+
+function convert2D_3D( ary ){
+    let i, v, rtn = new Array( (ary.length / 2) * 3 );
+
+    for( v of flatVec2Iter( ary ) ){
+        i           = v.vi * 3;
+        rtn[ i++ ]  = v.x;
+        rtn[ i++ ]  = 0;
+        rtn[ i ]    = v.y;
+    }
+
+    return rtn;
+}
+
+function extrude( fIdx, fVerts, extrudeLen=1 ){
+    let rtnIdx      = fIdx.slice();     // Clone Data
+    let rtnVerts    = fVerts.slice();
+    let ai          = 0;                // Starting Index of the Bottom Poly
+    let bi          = fVerts.length;    // Starting Index of the Top Poly
+
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Duplicate Vertices but moving it UP by LEN amount
+    let v;
+    for( v of flatVec3Iter( fVerts ) ) rtnVerts.push( v.x, v.y + extrudeLen, v.z );
+
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Create Indices of the duplicate polygon but with a 
+    // reverse winding to render front face upwards
+    let i, vertIdx = fVerts.length / 3;
+    for( i=0; i < fIdx.length; i+=3 ){
+        rtnIdx.push(
+            vertIdx + fIdx[ i+2 ],
+            vertIdx + fIdx[ i+1 ],
+            vertIdx + fIdx[ i ],
+        );
+    }
+
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Create Wall Quads
+    let vertCnt  = fVerts.length / 3;
+    let startIdx = rtnVerts.length / 3;
+    let aii, bii;         
+
+    vertIdx = startIdx;
+    let pai = vertIdx++,
+        pbi = vertIdx++;
+
+    //---------------------------------
+    // Add the first Edge of the Wall
+    rtnVerts.push( rtnVerts[ ai ], rtnVerts[ ai+1 ], rtnVerts[ ai+2 ] ); // Bottom Vert
+    rtnVerts.push( rtnVerts[ bi ], rtnVerts[ bi+1 ], rtnVerts[ bi+2 ] ); // Top Vert
+
+    for( i=1; i < vertCnt; i++ ){
+        //---------------------------------
+        // Duplicate Vertices to create an edge to help create a Quad face
+        aii = i * 3 + ai; // Starting Index Bottom Vert
+        bii = i * 3 + bi; // Starting Index for Top Vert
+
+        // Add new Points to return array
+        rtnVerts.push( rtnVerts[ aii ], rtnVerts[ aii+1 ], rtnVerts[ aii+2 ] ); // Bottom Vert
+        rtnVerts.push( rtnVerts[ bii ], rtnVerts[ bii+1 ], rtnVerts[ bii+2 ] ); // Top Vert
+
+        //---------------------------------
+        // Running Count of vertices created
+        aii = vertIdx++; // Bottom Vertex Index
+        bii = vertIdx++; // Top Vertex Index
+
+        // Define two triangles of the quad face abc-cda format
+        rtnIdx.push( pbi, pai, aii, aii, bii, pbi );
+
+        // Save edge indexes for next iteration
+        pai = aii;
+        pbi = bii;
+    }
+
+    //---------------------------------
+    // Create Final Face closing the loop between the last points and the first
+    aii = startIdx;
+    bii = startIdx + 1;
+    rtnIdx.push(  pbi, pai, aii, aii, bii, pbi );
+
+    return { indices:rtnIdx, vertices:rtnVerts };
+}
+
+
+//#region DRAWING
+function draw3DPoints( flatAry ){
+    const len  = flatAry.length;
+    const end  = len - 3;
+    const cnt  = len / 3 - 1;
+    const cMin = 0xffffff * 0.07;
+    const cRng = 0xffffff - cMin;
+    let v, color, shape;
+
+    for( v of flatVec3Iter( flatAry ) ){
+        color = Math.floor( cMin + ( v.vi / cnt ) * cRng );
+        shape = ( v.i == 0 || v.i == end)? 0 : 1;
+        Pnt.addRaw( v.x, v.y, v.z, color, 10, shape );
+    }
+
+    /*
+    for( let i=0; i < len; i+=3 ){
+        color = Math.floor( cMin + (i/3/cnt) * cRng );
+        shape = ( i == 0 || i == end)? 0 : 1;
+        Pnt.addRaw( flatAry[i], flatAry[i+1], flatAry[i+2], color, 10, shape );
+    }
+    */
+}
+//#endregion ///////////////////////////////////////
+
+//#region ITERATORS
+function flatVec3Iter( ary ){
+    let     i       = 0;
+    const   result  = { value:{ x:0, y:0, z:0, i:0, vi:0 }, done:false },
+            len     = ary.length,
+            next    = ()=>{
+                if( i >= len ) result.done = true;
+                else{
+                    result.value.i  = i;                    // Buffer Index
+                    result.value.vi = Math.floor( i / 3 );  // Vector Index
+                    result.value.x  = ary[ i++ ];           // X Y Z
+                    result.value.y  = ary[ i++ ];
+                    result.value.z  = ary[ i++ ];
+                }
+                return result;
+            };
+    return { [Symbol.iterator](){ return{ next }; } };
+}
+
+function flatVec2Iter( ary ){
+    let     i       = 0;
+    const   result  = { value:{ x:0, y:0, i:0, vi:0 }, done:false },
+            len     = ary.length,
+            next    = ()=>{
+                if( i >= len ) result.done = true;
+                else{
+                    result.value.i  = i;                    // Buffer Index
+                    result.value.vi = Math.floor( i / 2 );  // Vector Index
+                    result.value.x  = ary[ i++ ];           // X Y Z
+                    result.value.y  = ary[ i++ ];
+                }
+                return result;
+            };
+    return { [Symbol.iterator](){ return{ next }; } };
+}
+//#endregion /////////////////////////////////////
+
+//#region THREEJS
+function newMesh( mat, indices, verts, norm=null, uv=null, color=null ){
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    let geo = new THREE.BufferGeometry();
+    geo.setIndex( new THREE.Uint16BufferAttribute( indices, 1 ) );
+    geo.setAttribute( "position", new THREE.Float32BufferAttribute( verts, 3 ) );
+
+    if( norm )  geo.setAttribute( "normal", new THREE.Float32BufferAttribute( norm, 3 ) );
+    if( uv )    geo.setAttribute( "uv",     new THREE.Float32BufferAttribute( uv, 2 ) );
+    if( color ) geo.setAttribute( "color",  new THREE.Float32BufferAttribute( color, 3 ) );
+
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    return new THREE.Mesh( geo, mat );
+}
+//#endregion ///////////////////////////////////
+
+</script></body></html>
