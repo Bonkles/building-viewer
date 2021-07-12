@@ -55,7 +55,7 @@ class GltfUtil{
         let n, g, geo_ary, list = [];
         
         for( n of mesh_names ){
-            geo_ary = Gltf.get_mesh( n, json, bin, false ); // Load Type Arrays
+            geo_ary = Gltf.get_mesh( n, json, bin, true ); // Load Type Arrays
 
             for( g of geo_ary ) list.push( this.mk_geo( g ) );
         }
@@ -84,7 +84,7 @@ class GltfUtil{
 	// Make a Mesh & Geometry Buffers
 	static mk_geo_mesh( g, mat ){
         let geo = this.mk_geo( g );
-		let m   = new THREE.Mesh( geo, mat );
+        let m   = new THREE.Mesh( geo, mat );
         m.name  = g.name;
 		return m;
 	}

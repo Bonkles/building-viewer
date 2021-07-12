@@ -4,7 +4,6 @@ import { OrbitControls } from "../node_modules/three/examples/jsm/controls/Orbit
 // #region STARTUP
 const mod_path = import.meta.url.substring( 0, import.meta.url.lastIndexOf("/") + 1 );
 const css_path = mod_path + "starter.css";
-const css_link = `<link href="${css_path}" rel="stylesheet" type="text/css">`;
 
 (function(){
 	let link    = document.createElement( "link" );
@@ -25,12 +24,13 @@ class Starter{
 	renderer		= null;
 	orbit			= null;
 	render_bind		= this.render.bind( this );
+	onRender		= null;
 
 	constructor( config={} ){ // { webgl2:true, grid:true, container:null }
 		//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 		// MAIN
 		this.scene				= new THREE.Scene();
-		this.camera				= new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 1, 2000 );
+		this.camera				= new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 1, 2500 );
 		this.camera.position.set( 0, 10, 20 );
 
 		//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -44,6 +44,9 @@ class Starter{
 		//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         // RENDERER
         let options = { antialias:true, alpha:true };
+
+		// THREE.JS can't handle loading into WebGL2 on its own
+		// Need to create canvas & get the proper context, pass those 2 into 3js
         if( config.webgl2 ){
             let canvas      = document.createElement( "canvas" );
             options.canvas  = canvas;
@@ -54,9 +57,13 @@ class Starter{
         this.renderer.setPixelRatio( window.devicePixelRatio );
 		this.renderer.setClearColor( 0x3a3a3a, 1 );
 		
+		//---------------------------------
+		// where to add the cnavas object, in a container or in the body.
 		if( config.container )	config.container.appendChild( this.renderer.domElement );
 		else 					document.body.appendChild( this.renderer.domElement );
 
+		//---------------------------------
+		// Have the canvas set as full screen or fill its container's space
 		if( config.fullscreen != false ){
 			this.renderer.setSize( window.innerWidth, window.innerHeight );
 		}else{
@@ -77,6 +84,8 @@ class Starter{
 
 	render(){
 		requestAnimationFrame( this.render_bind );
+
+		if( this.onRender ) this.onRender();
 		this.renderer.render( this.scene, this.camera );
 	}
 	// #endregion ////////////////////////////////////////////////////////////////////////////////////////
@@ -100,6 +109,35 @@ class Starter{
 	}
 	// #endregion ////////////////////////////////////////////////////////////////////////////////////////
 
+	// #region PROTOTYPING
+
+	// Create a Cube with its faces colored a specific way based on which direction/axis it faces.
+	// The Main bits are RED:FORWARD(+Z), GREEN:LEFT(+X), BLUE:TOP(+Y)
+	static facedCube( pos=null, scl=null ){
+		const geo = new THREE.BoxGeometry( 1, 1, 1 );
+		const mat = [
+			new THREE.MeshBasicMaterial( { color: 0x00ff00 } ), // Left
+			new THREE.MeshBasicMaterial( { color: 0x777777 } ), // Right
+			new THREE.MeshBasicMaterial( { color: 0x0000ff } ), // Top
+			new THREE.MeshBasicMaterial( { color: 0x222222 } ), // Bottom
+			new THREE.MeshBasicMaterial( { color: 0xff0000 } ), // Forward
+			new THREE.MeshBasicMaterial( { color: 0xffffff } ), // Back
+		];
+
+		const mesh = new THREE.Mesh( geo, mat );
+		
+		if( pos )			mesh.position.fromArray( pos );
+		if( scl != null )	mesh.scale.set( scl, scl, scl );
+
+		return mesh; 
+	}
+
+	static axis( size=1 ){
+		return new THREE.AxisHelper( size );
+	}
+	// #endregion ////////////////////////////////////////////////////////////////////////////////////////
+	
+	// #region MISC
 	static ImgBlobPromise( blob ){
 		let img 		= new Image();
 		img.crossOrigin	= "anonymous";
@@ -109,6 +147,7 @@ class Starter{
 			img.onerror	= reject;
 		});
 	}
+	// #endregion ////////////////////////////////////////////////////////////////////////////////////////
 }
 
 export default Starter;

@@ -12,9 +12,10 @@
 </head><body><script type="module">
 
 //#region IMPORTS
-import Starter  from "../src/starter.js";
-import Global   from "../src/global.js";
-import CityView from "../src/CityView.js";
+import Starter      from "../src/starter.js";
+import Global       from "../src/global.js";
+import CityView     from "../src/CityView.js";
+import QuatAxisMesh from "../src/lib/QuatAxisMesh.js";
 
 import {
     enuToGeodetic,
@@ -23,6 +24,7 @@ import {
     CameraControls,
     RenderMode,
     RenderPass,
+    ComponentSize,
 } from "../node_modules/mapillary-js/dist/mapillary.module.js";
 
 import * as THREE from "../node_modules/three/build/three.module.js";
@@ -49,11 +51,16 @@ window.addEventListener( "load", _=>{
     mapView         = new MapView( panes.center );
     cityView        = new CityView( panes.right );
     customRenderer  = new GeoEntityRenderer();
+
     //tmpView         = new MapViewTexture( panes.temp );
     panes.temp.parentNode.removeChild( panes.temp );
 
     //---------------------------------
-    customRenderer.useTestCube();
+    //customRenderer.useTestCube();
+    customRenderer.useTestOrigin();
+    //customRenderer.useTestAxis();
+    customRenderer.useQuatAxis();
+
     streetView.addCustomRenderer( customRenderer );
     cityView.init().then(()=>{
         let ge = new CityGeoEntity( cityView.geo );
@@ -68,7 +75,7 @@ window.addEventListener( "load", _=>{
     streetView.moveTo( START_MARKER.imgId );
 
     //---------------------------------
-    cityView.world.add( Starter.facedCube( [-500,30,500], 40 ) );
+    //cityView.world.add( Starter.facedCube( [-500,30,500], 40 ) );
 });
 
 // Create Panel Containers
@@ -144,7 +151,11 @@ class StreetView{
     constructor( parentElm ){
         this.view = new Viewer({
             accessToken     : Global.MAPILLARY_TOKEN,
+            renderMode      : RenderMode.Fill, //Letterbox,
             container       : parentElm,
+            component       : {
+                bearing : { size: ComponentSize.Large },
+            },
         } );
 
         //https://a.mapillary.com/v3/images?client_id=MLY|3844773618966746|35a544151b8db9dfe734d33ad4e3f41a&closeto=-122.3079,47.6537&radius=200
@@ -155,6 +166,12 @@ class StreetView{
         //this.view.on( "bearing",    this.onBearing.bind( this ) );
         this.view.on( "fov",        this.onFov.bind( this ) );
         this.view.on( "pov",        this.onPov.bind( this ) );
+
+        // Cache view's information on callbacks, hard to grab otherwise.
+        this.position               = null;
+        this.bearing                = null;
+        this.verticalFov            = 0;
+        this.horizontalFov          = 0;
     }
 
     // #region EVENTS
@@ -179,12 +196,14 @@ class StreetView{
 
     async onPosition(){
         const pos = await this.view.getPosition();
+        this.position = pos;
         onMarkerMove( pos.lng, pos.lat );
     }
 
     async onFov( e ){
         const view = this.view;
         
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         const viewerContainer = view.getContainer();
         const height          = viewerContainer.offsetHeight;
         const width           = viewerContainer.offsetWidth;
@@ -193,11 +212,15 @@ class StreetView{
         const verticalFov     = Math.PI / 180 * (await view.getFieldOfView());
         const horizontalFov   = 180 / Math.PI * Math.atan( aspect * Math.tan( 0.5 * verticalFov ) ) * 2;
 
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        this.horizontalFov    = horizontalFov;
+        this.verticalFov      = verticalFov;
         onMarkerFov( horizontalFov );
     }   
 
     async onPov( e ){
         const pov = await this.view.getPointOfView();
+        this.bearing = pov.bearing;
         onMarkerBearing( pov.bearing );
     };
     // #endregion
@@ -452,6 +475,7 @@ class MapViewTexture{
     render( context :WebGLRenderingContext, viewMatrix: number[], projectionMatrix : number[] ) : void, // Perform rendereringon shared webgl context
 } */
 class GeoEntityRenderer{ // implements ICustomRenderer
+    
     // #region MAIN
     id          = "three-mapillary-renderer";
     renderPass  = RenderPass.Opaque; // Mapillary Value
@@ -488,21 +512,66 @@ class GeoEntityRenderer{ // implements ICustomRenderer
         let ge;
         for( ge of this.items ) ge.updateReferencePos( ref );
     }
+    // #endregion
 
+    // #region DEBUGGING
     useTestCube( lng=-71.06634194966573, lat=42.36116202169575 ){
         const mesh = Starter.facedCube( null, 3 );
         this.addMesh( mesh, lng, lat );
         //this.addEntity( new CityGeoEntity( mesh, lng, lat ) );
         return this;
     }
+
+    useTestOrigin(){
+        const mesh = Starter.facedCube( null, 1 );
+        const ent  = new GeoEntity( mesh, null, null, false );
+        mesh.position.z = -5;
+        this.addEntity( ent );
+        return this;
+    }
+
+    useTestAxis(){
+        const mesh = Starter.axis( 100 );
+        const ent  = new GeoEntity( mesh, null, null, false );
+        mesh.position.z = -1;
+        this.addEntity( ent );
+        return this;
+    }
+
+    useQuatAxis(){
+        const mesh       = QuatAxisMesh();
+        const ent        = new GeoEntity( mesh, null, null, false );
+        mesh.position.z  = -2;
+        mesh.renderOrder = 1000;
+
+        ent.onPreRender = function( view, render ){
+            let mpos  = new THREE.Vector3();
+            let mscl  = new THREE.Vector3();
+            let mrot  = new THREE.Quaternion();
+
+            render.camera.matrix.decompose( mpos, mrot, mscl );
+
+            this.mesh.material.uniforms.quat.value = mrot.toArray();
+
+            // Keep View in front of the camera
+            mpos.set( 0, 0, -1 );
+            mpos.applyQuaternion( mrot );
+            this.mesh.position.copy( mpos );
+        }
+
+        this.addEntity( ent );
+    }
     // #endregion
 
     // #region ICustomRenderer Events
+    
     onAdd( view, ref, context ){
         const canvas    = view.getCanvas();
         this.renderer   = new THREE.WebGLRenderer( { canvas, context } );
 
         this.renderer.autoClear         = false;
+        this.renderer.sortObjects       = true;
+
         this.camera.matrixAutoUpdate    = false;
         this.reference                  = ref;
 
@@ -522,12 +591,113 @@ class GeoEntityRenderer{ // implements ICustomRenderer
         this.renderer.dispose();
     }
 
-    render( view, viewMatrix, projMatrix ){
+    quatFromAxis( xAxis, yAxis, zAxis ){
+        // ThreeJS doesn't have this sort of function in its math library.
+        // TODO: When finished porting my Math Lib to TypeScript / NPM Module, use that instead of
+        // hacking bits of it into the project.
+        let m00 = xAxis[0], m01 = xAxis[1], m02 = xAxis[2],
+            m10 = yAxis[0], m11 = yAxis[1], m12 = yAxis[2],
+            m20 = zAxis[0], m21 = zAxis[1], m22 = zAxis[2],
+            t = m00 + m11 + m22,
+            x, y, z, w, s;
+
+        if(t > 0.0){
+            s = Math.sqrt(t + 1.0);
+            w = s * 0.5 ; // |w| >= 0.5
+            s = 0.5 / s;
+            x = (m12 - m21) * s;
+            y = (m20 - m02) * s;
+            z = (m01 - m10) * s;
+        }else if((m00 >= m11) && (m00 >= m22)){
+            s = Math.sqrt(1.0 + m00 - m11 - m22);
+            x = 0.5 * s;// |x| >= 0.5
+            s = 0.5 / s;
+            y = (m01 + m10) * s;
+            z = (m02 + m20) * s;
+            w = (m12 - m21) * s;
+        }else if(m11 > m22){
+            s = Math.sqrt(1.0 + m11 - m00 - m22);
+            y = 0.5 * s; // |y| >= 0.5
+            s = 0.5 / s;
+            x = (m10 + m01) * s;
+            z = (m21 + m12) * s;
+            w = (m20 - m02) * s;
+        }else{
+            s = Math.sqrt(1.0 + m22 - m00 - m11);
+            z = 0.5 * s; // |z| >= 0.5
+            s = 0.5 / s;
+            x = (m20 + m02) * s;
+            y = (m21 + m12) * s;
+            w = (m01 - m10) * s;
+        }
+        
+        return new THREE.Quaternion( x, y, z, w );
+    }
+
+    fixCamera( mtx, rmPosition=false ){
+        let mpos  = new THREE.Vector3();
+        let mscl  = new THREE.Vector3();
+        let mrot  = new THREE.Quaternion();
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        let m = new THREE.Matrix4();
+        m.fromArray( mtx ).invert(); // Matrix passed in is inverted for Shader use, Need to invert it back to get worldspace transform
+        m.decompose( mpos, mrot, mscl );
+
+        /* NOTES : "Kinda" Works, Very Naive / Unstable way to go about it though
+        let euler = new THREE.Euler();
+        euler.setFromQuaternion( mrot, "XYZ" ); // This order works best
+        euler.x = euler.x - Math.PI / 2;
+        //euler.z = euler.z + Math.PI;
+        //euler.z = euler.z - Math.PI / 2;
+        //euler.x = -euler.x;
+        mrot.setFromEuler( euler );
+        console.log( "MATRIX EULER", euler.x * 180/Math.PI, euler.y * 180/Math.PI, euler.z * 180/Math.PI, );
+        */
+
+        /* NOTES : Digging around the Mapillary source
+        I found RenderCamera which takes in Camera. Camera isn't being initialized with a Transform, so its default settings
+        for LookAt is [1,0,0] which typically its defining a FORWARD direction, in this case is defining +X as the the new
+        world Forward. Its up is [0,0,1] which is +Z. Since a rotational axis needs to be orthogonal, I can assume Right is [0,1,0]
+        is +Y without doing a CrossProduct. Looking at the Faced Cube in my debugging I do see the UP Face pointing in the +X direction.
+        So with an axis created Quaternion and getting its inverse, we can pre multiple the rotation in the View Matrix, this
+        creates a rotation offset from whats used to preMul as a sort of Origin. This basicly removes the wacky rotation Mapillary uses
+        to transform the world axis back into typical WebGL world axis.
+        https://github.com/mapillary/mapillary-js/blob/bfa983978532362d7516e039c4046f515a11126e/src/geo/Camera.ts#L28 */
+        let qFix = this.quatFromAxis( [0,1,0], [0,0,1], [1,0,0] ).invert(); // FWD: +X, UP: +Z, RIGHT: +Y
+        mrot.premultiply( qFix );
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        if( rmPosition ) mpos.set( 0, 0, 0 );
+
+        //console.log( "fix", "pos", mpos, "scl",mscl );
+
+        m.compose( mpos, mrot, mscl );  // Rebuld the Matrix
+
+        //console.log( m.elements );
+        //console.log( "MATRIX POS", mpos );
+
+        return m.elements;  // Return the RAW Array of the Matrix
+    }
+
+    render( view, viewMatrix, projMatrix ){ // view: WebGLContext, viewMatrix: Array[16], projMatrix: Array[16]
+        // Don't bother rendering if the view's position/bearing is unknown.
+        if( streetView.position === null || streetView.bearing === null ) return;
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        //console.log( viewMatrix );
+        let fixViewMatrix = this.fixCamera( viewMatrix, true ); // Switch World Axis to Match WebGL, clear out translation
+
         //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         // Update Camera
-        this.camera.matrix.fromArray( viewMatrix ).invert();
+        //this.camera.matrix.fromArray( viewMatrix ).invert();
+        this.camera.matrix.fromArray( fixViewMatrix );
         this.camera.updateMatrixWorld( true );
         this.camera.projectionMatrix.fromArray( projMatrix );
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        const pos     = streetView.position;
+        const bearing = streetView.bearing;
 
         //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         // DEBUGGING-TEMP
@@ -550,7 +720,7 @@ class GeoEntityRenderer{ // implements ICustomRenderer
         //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         // PreRender Handling
         let ge;
-        for( ge of this.items ) ge.onPreRender( view );
+        for( ge of this.items ) ge.onPreRender( streetView, this );
         
         //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         // Render Scene
@@ -562,11 +732,13 @@ class GeoEntityRenderer{ // implements ICustomRenderer
 }
 
 class GeoEntity{
-    constructor( mesh, lng=null, lat=null ){
-        this.mesh   = mesh;
-        this.alt    = 2;
-        this.lng    = 0;
-        this.lat    = 0;
+    constructor( mesh, lng=null, lat=null, useGeoPosition=true ){
+        this.mesh           = mesh;
+        this.alt            = 2;
+        this.lng            = 0;
+        this.lat            = 0;
+        this.useGeoPosition = useGeoPosition;
+
         if( lng != null && lat != null ) this.setLngLat( lng, lat );
     }
 
@@ -577,8 +749,10 @@ class GeoEntity{
     }
 
     updateReferencePos( ref ){
-        let pos = geodeticToEnu( this.lng, this.lat, this.alt, ref.lng, ref.lat, ref.alt );
-        this.mesh.position.fromArray( pos );
+        if( this.useGeoPosition ){
+            let pos = geodeticToEnu( this.lng, this.lat, this.alt, ref.lng, ref.lat, ref.alt );
+            this.mesh.position.fromArray( pos );
+        }
         return this;
     }
 
@@ -589,6 +763,10 @@ class GeoEntity{
         this.mesh.material.forEach( m=>m.dispose() );
     }
 }
+
+// Positioning the City as is will not work. Issues being Rotation is applied before translation.
+// ** Possible solution is to rotate the translation along with the model, so it shifts to the correct spot at origin.
+// ** Maybe a fixed Rotation needs to be on model to try to set whats forward, so that camera can do most of the rotation.
 
 class CityGeoEntity extends GeoEntity{
     constructor( geo, lng=null, lat=null ){ 
@@ -617,15 +795,30 @@ class CityGeoEntity extends GeoEntity{
         return this;
     }
 
+    // ( vec * scl ) * rot + pos
     onPreRender( view ){
-        this.mesh.position.x = 0;
-        this.mesh.position.y = 0;
-        this.mesh.position.z = 0;
-        this.mesh.rotation.x = 0;
-        this.mesh.rotation.y = 0;
-        this.mesh.rotation.z = 0;
+        const SCALE = 5.0;
+
+        let pos = cityView.getPosFromLngLat( view.position.lng, view.position.lat );
+        //let rot = cityView.getBearing( view.bearing );
+
+        //let d   = ( view.bearing - 180 );
+        //let rot = d * ( Math.PI / 180 ); // toRadians
+
+        let rot = 90 * ( Math.PI / 180 );
+        
+        //rot *= 0.2;
+        //pos[ 0 ] += -50;
+
+        //this.mesh.position.set( -pos[0] * SCALE, -40 * SCALE, -pos[1] * SCALE );
+        this.mesh.position.set( -pos[0] , -40 , -pos[1] );
+        this.mesh.rotation.set( 0, rot, 0 );
+        this.mesh.scale.set( SCALE, SCALE, SCALE );
+        
+        //console.log( "scl", this.mesh.scale, "pos", this.mesh.position );
     }
 }
+
 
 function geoToWireframe( geo ){
     let mesh, mat;

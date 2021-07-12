@@ -52,8 +52,8 @@ class PointsMesh{
 	}
 
 	add( p, hex=0xff0000, size=null, shape=null ){ 
-        if( Array.isArray( p ) )              this.addRaw( p[0], p[1], p[2], hex, shape, size ); 
-        else if( p instanceof THREE.Vector3 ) this.addRaw( p.x, p.y, p.z, hex, shape, size ); 
+        if( Array.isArray( p ) )              this.addRaw( p[0], p[1], p[2], hex, size, shape ); 
+        else if( p instanceof THREE.Vector3 ) this.addRaw( p.x, p.y, p.z, hex, size, shape ); 
         return this;
     }
 
@@ -94,7 +94,7 @@ function get_material(){
 		vertexShader	: vert_src, 
 		fragmentShader	: frag_src, 
 		transparent 	: true, 
-		uniforms 		: { u_scale:{ value : 8.0 } } 
+		uniforms 		: { u_scale:{ value : 20.0 } } 
 	} );
 
 	return gMat;
