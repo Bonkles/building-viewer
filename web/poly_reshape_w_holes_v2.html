@@ -1,0 +1,331 @@
+<!DOCTYPE html><html><head><title></title></head><body><script type="module">
+
+import Starter, { THREE }       from "../src/starter.js";
+import UnlitMaterial            from "../src/UnlitMaterial.js";
+import Draggables               from "../src/lib/Draggables.js";
+import earcut                   from "../src/lib/earcut.js";
+import PointsMesh               from "../src/lib/PointsMesh.js";
+
+import GeoUtil                  from "../node_modules/oito/dist/geometry/Util.js";
+import Vec3                     from "../node_modules/oito/dist/Vec3.js";
+
+let App, Drag, DyMesh;
+let Pnt;
+
+// https://github.com/mrdoob/three.js/blob/master/src/geometries/ExtrudeGeometry.js
+// https://github.com/mrdoob/three.js/blob/d0340e3a147e290fa86d14bc3ed97d8e1c20602e/src/extras/ShapeUtils.js#L3
+// https://threejs.org/docs/index.html#manual/en/introduction/How-to-update-things
+// https://github.com/mapbox/earcut
+
+window.addEventListener( "load", _=>{
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    App = new Starter( { webgl2:false, grid:true } );
+    App.set_camera( 0, 20, 6 ).render();
+
+    Pnt = new PointsMesh( 20 );
+    App.add( Pnt.mesh );
+
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Drag = new Draggables( App );
+    Drag.onMove = TestPoints.onGizmoMove;
+    Drag.onStop = TestPoints.onGizmoStop;
+
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    DyMesh = new DynamicMesh( UnlitMaterial( "cyan", true ) );
+    DyMesh.mesh.material.side = THREE.DoubleSide;
+    App.add( DyMesh.mesh );
+
+    TestPoints.generatePoints(
+        [
+            [ -1, 0, -1 ],
+            [ -1, 0,  1 ],
+            [  0, 0,  2 ],
+            [  1, 0,  1 ],
+            [  1, 0, -1 ],
+            [ 0,0, 0.3 ],
+            [ 0.5, 0, -0.5 ],
+            [ -0.5, 0, -0.5 ],
+            [ 0,0, 0.6 ],
+            [ 0.5, 0, 0.8 ],
+            [ -0.5, 0, 0.8 ],
+        ],[ 5, 8 ]
+    );
+
+    TestPoints.rebuild();
+});
+
+class TestPoints{
+    static points       = [];
+    static extPoint     = null;
+    static holes        = null;
+
+    static IEdgeLoops   = [];
+
+    static onGizmoStop( o ){ TestPoints.rebuild(); }
+    static onGizmoMove( o ){
+        if( o.userData.xzOnly ){
+            o.position.y = 0;
+        }else if( o.userData.yOnly ){
+            o.position.x = 0;
+            o.position.z = 0;
+            if( o.position.y < 0 ) o.position.y = 0;
+        }
+    }
+
+    static generatePoints( poly, holes ){
+        var cGeo    = new THREE.BoxGeometry( 0.1, 0.1, 0.1 );
+        let sGeo    = new THREE.SphereGeometry( 0.1, 8, 8 );
+        let mat0    = new THREE.MeshPhongMaterial( { color:0xffff00, depthTest:false } );
+        let mat1    = new THREE.MeshPhongMaterial( { color:0x00ff00, depthTest:false } );
+        let mat2    = new THREE.MeshPhongMaterial( { color:0xff0000, depthTest:false } );
+        let mat3    = new THREE.MeshPhongMaterial( { color:0xffffff, depthTest:false } );
+        
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        
+        let mesh, mat, pos, end = poly.length - 1;
+
+        let geo     = sGeo;
+        let loopCnt = 1;
+        let holeIdx = holes.sort().slice( 0 );  // Makes it easier to spit edge loops if the hole indices are in order
+        let iNext   = holeIdx.shift();          // Get The first Index that starts another edge loop
+        let iAry    = [];                       // Build Edge Loop Indices
+        this.IEdgeLoops.push( iAry );           // Save Main Poly as the first Edge Loop
+
+        for( let i=0; i <= end ; i++ ){
+            //---------------------------------
+            if( i == iNext ){
+                loopCnt++;
+                geo     = cGeo;                 // Switch to Cube Geo
+                iAry    = [];                   // Start a new Array
+                this.IEdgeLoops.push( iAry );   // Save it for the holes
+
+                // Get the Index that'll start the next Edge Loop
+                if( holeIdx.length > 0 ) iNext = holeIdx.shift();
+            }
+
+            iAry.push( i ); // Save index to Edge Loop Index Array
+
+            //---------------------------------
+            // Create a Renderable
+            mat  = ( i == 0 )? mat1 : ( i == end )? mat2 : mat0;
+            mesh = new THREE.Mesh( geo, mat );
+            mesh.position.fromArray( poly[ i ] );
+            mesh.userData.xzOnly = true;
+            mesh.renderOrder = 10;
+
+            //---------------------------------
+            App.add( mesh );            // To Scene Graph for rendering
+            Drag.add( mesh );           // To Ray Casting Intersection testing
+            this.points.push( mesh );   // Keep Track of Movable Points
+        }
+
+        this.holes = holes; // Save index
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Add Point to control extrusion height
+        geo = new THREE.ConeGeometry( 0.2, 0.2, 8 );
+        this.extPoint = new THREE.Mesh( geo, mat3 );
+        this.extPoint.position.y        = 0.0;
+        this.extPoint.userData.yOnly    = true;
+
+        App.add( this.extPoint );
+        Drag.add( this.extPoint );
+    }
+
+    static rebuild(){
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Flatten Point Positions
+        let pnts = new Array( this.points.length * 2 ),
+            i    = 0,
+            p;
+        for( p of this.points ){
+            pnts[ i++ ] = p.position.x;
+            pnts[ i++ ] = p.position.z;
+        }
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        let faces = earcut( pnts, this.holes, 2 ); // 3D mode
+        if( !faces || faces.length == 0 ){
+            console.log( "Earcut can not created indices" );
+            return;
+        }
+
+        //console.log( faces );
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Set Vertices + Indices
+        DyMesh.reset();     // Start with a Fresh set of arrays
+
+        //GeoUtil.reverseWinding( faces );                        // Flip the Faces, They point down from earcut;
+        Array.prototype.push.apply( DyMesh.indices, faces );    // Copy Dat to Indices
+
+        // Copy Vertices over to Mesh
+        let m;
+        for( m of this.points ) DyMesh.vertices.push( m.position.x, m.position.y, m.position.z );
+
+        /*
+        // Extrude the Shape to create a wall in the shape of the polygon
+        let dir = [0, this.extPoint.position.y, 0 ];    // Direction to extrude
+        let end = DyMesh.vertices.length;               // Save End index of the starting vert loop
+        extrudeWall( DyMesh, dir );                     
+
+        // Move the Origin Vert loop to the extuded position
+        Vec3.bufMap( DyMesh.vertices, v=>v.add( dir ), 0, end );
+        */
+
+        let dir = [0, this.extPoint.position.y, 0 ];    // Direction to extrude
+        let end = DyMesh.vertices.length;               // Save End index of the starting vert loop
+        
+        // Extrude every edge loop in array
+        for( let i=0; i < this.IEdgeLoops.length; i++ ){
+            extrudeWall( DyMesh, this.IEdgeLoops[ i ], dir );
+        }
+        
+        // Move the Original Vert loop to the extuded position
+        Vec3.bufMap( DyMesh.vertices, v=>v.add( dir ), 0, end );
+
+        // Generate Normals for all the faces
+        GeoUtil.appendTriangleNormals( DyMesh );
+
+        // Update GeometryBuffer with the new Data.
+        DyMesh.rebuild();
+    }
+
+}
+
+function extrudeWall( geo, eloop, dir ){
+    let idx  = geo.vertices.length / 3;
+    let iTop = [];
+    let iBot = [];
+    let v    = new Vec3();
+    let i;
+
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Create Two new Edge loops out of the Edge Loop Passed in
+    for( i of eloop ){
+        v   .fromBuf( geo.vertices, i*3 )   // Read Vert From Buffer
+            .pushTo( geo.vertices )         // Add Copy back as Bottom Wall Vertex
+            .add( dir )                     // Shift point to extude direction
+            .pushTo( geo.vertices );        // Add Extrude point back as Top Wall Vertex
+
+        iBot.push( idx++ );                 // Save Index of both Edge Loops
+        iTop.push( idx++ );
+    }
+
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Generate Face indices that stitch together the 2 new edge loops.
+    let end = iTop.length;
+    let ii, a, b, c, d;
+    for( i=0; i < end; i++ ){
+        ii  = ( i + 1 ) % end;
+        a   = iTop[ i ];
+        b   = iBot[ i ];
+        c   = iBot[ ii ];
+        d   = iTop[ ii ];
+        geo.indices.push( a, b, c, c, d, a );
+    }
+
+    /*
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Create Wall Loop From the Starting Loop in Geo
+    for( v of Vec3.bufIter( geo.vertices ) ){
+        v   .pushTo( geo.vertices ) // bottom
+            .add( dir )             // Add Extrude Direction
+            .pushTo( geo.vertices ) // Top
+        
+        iBot.push( idx++ );         // Save the Index of each item in the loops
+        iTop.push( idx++ );
+    }
+
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Generate Indices for the new Faces created by the Two Vert Loops
+    let end = iTop.length;
+    let i, ii, a, b, c, d;
+    for( i=0; i < end; i++ ){
+        ii  = ( i + 1 ) % end;
+        a   = iTop[ i ];
+        b   = iBot[ i ];
+        c   = iBot[ ii ];
+        d   = iTop[ ii ];
+        geo.indices.push( a, b, c, c, d, a );
+    }
+    */
+}
+
+
+
+class DynamicMesh{
+    mesh        = null;
+
+    vertices    = [];
+    indices     = [];
+    normals     = [];
+
+    _vertCount  = 0;
+    _normCount  = 0;
+    _idxCount   = 0;
+
+    constructor( mat=null ){
+        this.mesh           = new THREE.Mesh();
+        this.mesh.material  = mat || new THREE.MeshPhongMaterial( {color:0x00ffff, side:THREE.DoubleSide } );
+    }
+
+    rebuild(){
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Geometry Buffers can't not be resized in ThreeJS
+        // Note : Buffers themselves in WebGL can, just a limitation of the Framework.
+        // Because of this, will need to recreate the Geometry Object if size is larger.
+        if( this.vertices.length > this._vertCount ||
+            this.indices.length > this._idxCount ||
+            this.normals.length > this._normCount ){
+            
+            this.mesh.geometry.dispose();
+            this.mesh.geometry = null;
+            this._mkGeo();
+
+            return;
+        }
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        let geo = this.mesh.geometry;
+        geo.index.array.set( this.indices );
+        geo.index.needsUpdate = true;
+        
+        geo.attributes.position.array.set( this.vertices );
+        geo.attributes.position.needsUpdate = true;
+
+        geo.attributes.normal.array.set( this.normals );
+        geo.attributes.normal.needsUpdate = true;
+
+        geo.computeBoundingBox();
+        geo.computeBoundingSphere();
+        geo.setDrawRange( 0, this.indices.length );
+    }
+
+    reset(){
+        this.vertices.length    = 0;
+        this.indices.length     = 0;
+        this.normals.length     = 0;
+        return this;
+    }
+
+    _mkGeo(){
+        //----------------------------------
+        // Define Geometry Object
+        const bGeo = new THREE.BufferGeometry();
+        bGeo.setIndex( this.indices );
+        bGeo.setAttribute( "position",  new THREE.BufferAttribute( new Float32Array( this.vertices ), 3 ) );
+        bGeo.setAttribute( "normal",  new THREE.BufferAttribute( new Float32Array( this.normals ), 3 ) );
+
+        this.mesh.geometry = bGeo;
+
+        //----------------------------------
+        if( this.vertices.length > this._vertCount )    this._vertCount     = this.vertices.length;
+        if( this.indices.length > this._idxCount )      this._idxCount      = this.indices.length;
+        if( this.normals.length > this._normCount )     this._normCount     = this.normals.length;
+
+        console.log( "CREATE GEO" );
+    }
+}
+
+</script></body></html>

@@ -52,8 +52,8 @@ class PointsMesh{
 	}
 
 	add( p, hex=0xff0000, size=null, shape=null ){ 
-        if( Array.isArray( p ) )              this.addRaw( p[0], p[1], p[2], hex, size, shape ); 
-        else if( p instanceof THREE.Vector3 ) this.addRaw( p.x, p.y, p.z, hex, size, shape ); 
+        if( Array.isArray( p ) || p instanceof Float32Array )	this.addRaw( p[0], p[1], p[2], hex, size, shape ); 
+        else if( p instanceof THREE.Vector3 ) 					this.addRaw( p.x, p.y, p.z, hex, size, shape ); 
         return this;
     }
 

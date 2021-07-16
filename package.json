@@ -2,7 +2,8 @@
   "dependencies": {
     "mapbox-gl": "^2.2.0",
     "mapillary-js": "^4.0.0",
-    "three": "0.127.0"
+    "three": "0.127.0",
+    "oito": "sketchpunk/oito.git"
   },
   
   "devDependencies": {
