@@ -387,6 +387,15 @@ class MapView{
     // #endregion
 }
 
+const MJS_TRANSFORM = new THREE.Matrix4()
+        .makeRotationFromEuler(
+            new THREE.Euler(-Math.PI / 2, 0, 0));
+
+// OR 
+// const MJS_TRANSFORM = new THREE.Matrix4()
+//         .makeRotationFromEuler(
+//             new THREE.Euler(Math.PI / 2, 0, 0))
+//         .invert();
 
 // Render City in Mapillary
 class CityRenderer {
@@ -452,16 +461,19 @@ class CityRenderer {
             reference.lat,
             reference.alt
         );
-        mesh.position.set( e, n, u );
+        const position = new THREE.Vector3(e, n, u)
+            .applyMatrix4(MJS_TRANSFORM);
+
+        mesh.position.copy(position);
 
         // The initial position set with geodeticToEnu is based on Mapillary's orientation, Since
         // the camera is being reoriented into the standard webgl orientation, the position needs
         // to be transformed to work correctly
-        const qOrient = quatFromAxis( [0,1,0], [0,0,1], [1,0,0] ).invert(); // FWD: +X, UP: +Z, RIGHT: +Y
-        const qAlign  = quatFromAxis( [0,0,-1], [0,1,0], [1,0,0] );
-        qOrient.premultiply( qAlign );
+        // const qOrient = quatFromAxis( [0,1,0], [0,0,1], [1,0,0] ).invert(); // FWD: +X, UP: +Z, RIGHT: +Y
+        // const qAlign  = quatFromAxis( [0,0,-1], [0,1,0], [1,0,0] );
+        // qOrient.premultiply( qAlign );
 
-        mesh.position.applyQuaternion( qOrient );
+        // mesh.position.applyQuaternion(qAlign);
 
         //------------------------------------------
         scene.add( mesh );
@@ -513,7 +525,7 @@ class CityRenderer {
     // move Up and Down without needing any changes its own transform that may be needed 
     // to conform to a different world orientation.
     mpos.y += 0.7;
-    mpos.x += -0.5; // Move it Left so So I can see the side of the cube to see the color of the left face
+    // mpos.x += -0.5; // Move it Left so So I can see the side of the cube to see the color of the left face
 
     //-----------------------
     this.cube.position.copy( mpos );
@@ -522,9 +534,17 @@ class CityRenderer {
   render(view, viewMatrix, projMatrix) {
     const { camera, scene, renderer, viewer } = this;
 
-    //this.camera.matrix.fromArray( viewMatrix ).invert();
-    this.camera.matrix.fromArray( reorientCamera( viewMatrix ) );
+    // this.camera.matrix.fromArray( viewMatrix ).invert();
+    // this.camera.matrix.fromArray( reorientCamera( viewMatrix ) );
 
+    const matrix = MJS_TRANSFORM
+        .clone()
+        .multiply( 
+            new THREE.Matrix4()
+                .fromArray(viewMatrix)
+                .invert());
+
+    this.camera.matrix.copy(matrix);
     this.camera.updateMatrixWorld(true);
     this.camera.projectionMatrix.fromArray(projMatrix);
 
