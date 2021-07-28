@@ -387,6 +387,9 @@ class MapView{
     // #endregion
 }
 
+const MJS_TRANSFORM = new THREE.Matrix4()
+        .makeRotationFromEuler(
+            new THREE.Euler(Math.PI / 2, 0, 0));
 
 // Render City in Mapillary
 class CityRenderer {
@@ -426,7 +429,7 @@ class CityRenderer {
             })
         );
 
-        mesh.rotation.set( Math.PI * 0.5, 0, 0 );
+        mesh.rotation.setFromRotationMatrix(MJS_TRANSFORM);
         mesh.geometry.computeBoundingBox();
         mesh.geometry.computeBoundingSphere();
         
@@ -502,7 +505,10 @@ class CityRenderer {
     // Note: Since the ViewMatrix changes the world's orientation, UP is now RIGHT. So
     // any movements on the Y axis moves things LEFT to RIGHT, not UP/DOWN as the
     // original intent of the 3D model was created for illustrating.
-    mpos.y -= 0.7;  
+
+    const translation = new THREE.Vector3(0, 0.7, 0);
+    translation.applyMatrix4(MJS_TRANSFORM);
+    mpos.add(translation);
     
     //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     this.cube.position.copy( mpos );
@@ -539,6 +545,7 @@ function facedCube( pos=null, scl=null ){
     ];
 
     const mesh = new THREE.Mesh( geo, mat );
+    mesh.rotation.setFromRotationMatrix(MJS_TRANSFORM);
     
     if( pos )			mesh.position.fromArray( pos );
     if( scl != null )	mesh.scale.set( scl, scl, scl );
