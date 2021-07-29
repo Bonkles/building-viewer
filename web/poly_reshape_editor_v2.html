@@ -1,0 +1,884 @@
+<!DOCTYPE html><html><head><title></title></head><body><script type="module">
+
+import Starter, { THREE }       from "../src/starter.js";
+import UnlitMaterial            from "../src/UnlitMaterial.js";
+import Draggables               from "../src/lib/Draggables.js";
+import earcut                   from "../src/lib/earcut.js";
+import PointsMesh               from "../src/lib/PointsMesh.js";
+import DynamicMesh              from "../src/lib/DynamicMesh.js";
+import ObjectPool               from "../src/lib/ObjectPool.js";
+import Dom                      from "../src/lib/Dom.js";
+
+import Earcut                   from "../src/lib/EarcutExtrude.js";
+
+import * as PP                  from "../node_modules/proppanel/dist/bundle.js";
+
+import GeoUtil                  from "../node_modules/oito/dist/geometry/Util.js";
+import Vec3                     from "../node_modules/oito/dist/Vec3.js";
+import Maths                    from "../node_modules/oito/dist/Maths.js";
+
+let gApp, gEditor;
+let Drag, DyMesh;
+let Pnt;
+
+// https://github.com/mrdoob/three.js/blob/master/src/geometries/ExtrudeGeometry.js
+// https://github.com/mrdoob/three.js/blob/d0340e3a147e290fa86d14bc3ed97d8e1c20602e/src/extras/ShapeUtils.js#L3
+// https://threejs.org/docs/index.html#manual/en/introduction/How-to-update-things
+// https://github.com/mapbox/earcut
+
+window.addEventListener( "load", _=>{
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    gApp = new Starter( { webgl2:false, grid:true } );
+    gApp.set_camera( 0, 60, 8 ).render();
+
+    gEditor = new Editor();
+    gEditor.init( gApp, true );
+    gEditor.showCurrentPoints();
+    gEditor.updateDynamicMesh();
+
+
+    /*
+    gEditor = new Editor( gApp );
+    gEditor
+        .initUI()                           // Setup Event Handlers
+        .addPoint( null, [ -1, 0, -1 ] )    // Starting Points
+        .addPoint( null, [ -1, 0,  1 ] )
+        .addPoint( null, [  1, 0,  1 ] )
+        .addPoint( null, [  1, 0, -1 ] );
+
+    gEditor.selectLoop();
+    gEditor.updateDynamicMesh();
+    */
+
+    /*
+    Pnt = new PointsMesh( 20 );
+    App.add( Pnt.mesh );
+    
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Drag = new Draggables( App );
+    Drag.onMove = TestPoints.onGizmoMove;
+    Drag.onStop = TestPoints.onGizmoStop;
+
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    DyMesh = new DynamicMesh( UnlitMaterial( "cyan", true ) );
+    DyMesh.mesh.material.side = THREE.DoubleSide;
+    App.add( DyMesh.mesh );
+
+    TestPoints.generatePoints(
+        [
+            [ -1, 0, -1 ],
+            [ -1, 0,  1 ],
+            [  0, 0,  2 ],
+            [  1, 0,  1 ],
+            [  1, 0, -1 ],
+            [ 0,0, 0.3 ],
+            [ 0.5, 0, -0.5 ],
+            [ -0.5, 0, -0.5 ],
+            [ 0,0, 0.6 ],
+            [ 0.5, 0, 0.8 ],
+            [ -0.5, 0, 0.8 ],
+        ],[ 5, 8 ]
+    );
+
+    TestPoints.rebuild();
+
+    */
+});
+
+class TestPoints{
+    static points       = [];
+    static extPoint     = null;
+    static holes        = null;
+
+    static IEdgeLoops   = [];
+
+    static onGizmoStop( o ){ TestPoints.rebuild(); }
+    static onGizmoMove( o ){
+        if( o.userData.xzOnly ){
+            o.position.y = 0;
+        }else if( o.userData.yOnly ){
+            o.position.x = 0;
+            o.position.z = 0;
+            if( o.position.y < 0 ) o.position.y = 0;
+        }
+    }
+
+    static generatePoints( poly, holes ){
+        var cGeo    = new THREE.BoxGeometry( 0.1, 0.1, 0.1 );
+        let sGeo    = new THREE.SphereGeometry( 0.1, 8, 8 );
+        let mat0    = new THREE.MeshPhongMaterial( { color:0xffff00, depthTest:false } );
+        let mat1    = new THREE.MeshPhongMaterial( { color:0x00ff00, depthTest:false } );
+        let mat2    = new THREE.MeshPhongMaterial( { color:0xff0000, depthTest:false } );
+        let mat3    = new THREE.MeshPhongMaterial( { color:0xffffff, depthTest:false } );
+        
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        
+        let mesh, mat, pos, end = poly.length - 1;
+
+        let geo     = sGeo;
+        let loopCnt = 1;
+        let holeIdx = holes.sort().slice( 0 );  // Makes it easier to spit edge loops if the hole indices are in order
+        let iNext   = holeIdx.shift();          // Get The first Index that starts another edge loop
+        let iAry    = [];                       // Build Edge Loop Indices
+        this.IEdgeLoops.push( iAry );           // Save Main Poly as the first Edge Loop
+
+        for( let i=0; i <= end ; i++ ){
+            //---------------------------------
+            if( i == iNext ){
+                loopCnt++;
+                geo     = cGeo;                 // Switch to Cube Geo
+                iAry    = [];                   // Start a new Array
+                this.IEdgeLoops.push( iAry );   // Save it for the holes
+
+                // Get the Index that'll start the next Edge Loop
+                if( holeIdx.length > 0 ) iNext = holeIdx.shift();
+            }
+
+            iAry.push( i ); // Save index to Edge Loop Index Array
+
+            //---------------------------------
+            // Create a Renderable
+            mat  = ( i == 0 )? mat1 : ( i == end )? mat2 : mat0;
+            mesh = new THREE.Mesh( geo, mat );
+            mesh.position.fromArray( poly[ i ] );
+            mesh.userData.xzOnly = true;
+            mesh.renderOrder = 10;
+
+            //---------------------------------
+            App.add( mesh );            // To Scene Graph for rendering
+            Drag.add( mesh );           // To Ray Casting Intersection testing
+            this.points.push( mesh );   // Keep Track of Movable Points
+        }
+
+        this.holes = holes; // Save index
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Add Point to control extrusion height
+        geo = new THREE.ConeGeometry( 0.2, 0.2, 8 );
+        this.extPoint = new THREE.Mesh( geo, mat3 );
+        this.extPoint.position.y        = 0.0;
+        this.extPoint.userData.yOnly    = true;
+
+        App.add( this.extPoint );
+        Drag.add( this.extPoint );
+    }
+
+    static rebuild(){
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Flatten Point Positions
+        let pnts = new Array( this.points.length * 2 ),
+            i    = 0,
+            p;
+        for( p of this.points ){
+            pnts[ i++ ] = p.position.x;
+            pnts[ i++ ] = p.position.z;
+        }
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        let faces = earcut( pnts, this.holes, 2 ); // 3D mode
+        if( !faces || faces.length == 0 ){
+            console.log( "Earcut can not created indices" );
+            return;
+        }
+
+        //console.log( faces );
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Set Vertices + Indices
+        DyMesh.reset();     // Start with a Fresh set of arrays
+
+        //GeoUtil.reverseWinding( faces );                        // Flip the Faces, They point down from earcut;
+        Array.prototype.push.apply( DyMesh.indices, faces );    // Copy Dat to Indices
+
+        // Copy Vertices over to Mesh
+        let m;
+        for( m of this.points ) DyMesh.vertices.push( m.position.x, m.position.y, m.position.z );
+
+        /*
+        // Extrude the Shape to create a wall in the shape of the polygon
+        let dir = [0, this.extPoint.position.y, 0 ];    // Direction to extrude
+        let end = DyMesh.vertices.length;               // Save End index of the starting vert loop
+        extrudeWall( DyMesh, dir );                     
+
+        // Move the Origin Vert loop to the extuded position
+        Vec3.bufMap( DyMesh.vertices, v=>v.add( dir ), 0, end );
+        */
+
+        let dir = [0, this.extPoint.position.y, 0 ];    // Direction to extrude
+        let end = DyMesh.vertices.length;               // Save End index of the starting vert loop
+        
+        // Extrude every edge loop in array
+        for( let i=0; i < this.IEdgeLoops.length; i++ ){
+            extrudeWall( DyMesh, this.IEdgeLoops[ i ], dir );
+        }
+        
+        // Move the Original Vert loop to the extuded position
+        Vec3.bufMap( DyMesh.vertices, v=>v.add( dir ), 0, end );
+
+        // Generate Normals for all the faces
+        GeoUtil.appendTriangleNormals( DyMesh );
+
+        // Update GeometryBuffer with the new Data.
+        DyMesh.rebuild();
+    }
+
+}
+
+function extrudeWall( geo, eloop, dir ){
+    let idx  = geo.vertices.length / 3;
+    let iTop = [];
+    let iBot = [];
+    let v    = new Vec3();
+    let i;
+
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Create Two new Edge loops out of the Edge Loop Passed in
+    for( i of eloop ){
+        v   .fromBuf( geo.vertices, i*3 )   // Read Vert From Buffer
+            .pushTo( geo.vertices )         // Add Copy back as Bottom Wall Vertex
+            .add( dir )                     // Shift point to extude direction
+            .pushTo( geo.vertices );        // Add Extrude point back as Top Wall Vertex
+
+        iBot.push( idx++ );                 // Save Index of both Edge Loops
+        iTop.push( idx++ );
+    }
+
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Generate Face indices that stitch together the 2 new edge loops.
+    let end = iTop.length;
+    let ii, a, b, c, d;
+    for( i=0; i < end; i++ ){
+        ii  = ( i + 1 ) % end;
+        a   = iTop[ i ];
+        b   = iBot[ i ];
+        c   = iBot[ ii ];
+        d   = iTop[ ii ];
+        geo.indices.push( a, b, c, c, d, a );
+    }
+
+    /*
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Create Wall Loop From the Starting Loop in Geo
+    for( v of Vec3.bufIter( geo.vertices ) ){
+        v   .pushTo( geo.vertices ) // bottom
+            .add( dir )             // Add Extrude Direction
+            .pushTo( geo.vertices ) // Top
+        
+        iBot.push( idx++ );         // Save the Index of each item in the loops
+        iTop.push( idx++ );
+    }
+
+    //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Generate Indices for the new Faces created by the Two Vert Loops
+    let end = iTop.length;
+    let i, ii, a, b, c, d;
+    for( i=0; i < end; i++ ){
+        ii  = ( i + 1 ) % end;
+        a   = iTop[ i ];
+        b   = iBot[ i ];
+        c   = iBot[ ii ];
+        d   = iTop[ ii ];
+        geo.indices.push( a, b, c, c, d, a );
+    }
+    */
+}
+
+//###########################################################################
+
+class Point{
+    constructor( pos=null ){
+        this.pos = new Vec3( pos );
+        this.id  = Maths.nanoId();
+    }
+}
+
+class EdgeLoop{
+    constructor( name="EdgeLoop" ){
+        this.name   = name;
+        this.id     = Maths.nanoId();
+        this.points = [];               // Need to keep Order of points
+        this.map    = new Map();        // Quick Searching
+    }
+
+    get pointCount(){ return this.points.length; }
+
+    rmPos( id ){
+        let p = this.map.get( id );
+        if( !p ){ console.log( "EdgeLoop.rmPos - Point ID not Found ", id ); return; }
+
+        let idx = this.points.indexOf( p );
+        this.points.splice( idx, 1 );
+        this.map.delete( id );
+    }
+
+    addPos( pos=null ){
+        let p = new Point( pos );
+
+        this.map.set( p.id, p );    
+        this.points.push( p );      
+        return p.id;
+    }
+
+    updatePos( id, pos ){
+        let p = this.map.get( id );
+
+        if( Array.isArray( pos ) || pos instanceof Float32Array ) p.pos.copy( pos );
+        else                                                      p.pos.fromStruct( pos );
+
+        return this;
+    }
+
+    firstPoint(){ return this.points[ 0 ]; }
+    lastPoint(){ return this.points[ this.points.length - 1 ]; }
+
+    getFlatArray( ary=null ){
+        let p;
+        ary ??= [];
+
+        for( p of this.points ) ary.push( p.pos[ 0 ], p.pos[ 1 ], p.pos[ 2 ] );
+
+        return ary;
+    }
+
+    dispose(){
+        this.points.length = 0;
+        this.map.clear();
+    }
+}
+
+class EditorX{
+    // #region MAIN
+    renderer        = null;
+    loops           = new Map();
+    mainLoopId      = null;
+
+    dragging        = new Draggables();
+    pool            = new ObjectPool();
+    meshGeo         = null;
+    meshMat         = null;
+    ui              = {};
+    selectedLoop    = null;
+
+    dynMesh         = null;
+
+    constructor( renderer ){
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        this.renderer = renderer;
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // SETUP
+
+        //------------------------------------
+        // Main Edge Loop to hold points of main polygon
+        let el = new EdgeLoop( "Polygon" );
+        this.loops.set( el.id, el );
+        this.mainLoopId     = el.id;
+        this.selectedLoop   = el;
+
+        //------------------------------------
+        // Reuseable Geo and Materials
+        this.meshGeo    = new THREE.SphereGeometry( 0.1, 8, 8 );
+        this.meshMat    = new THREE.MeshPhongMaterial( { color:0xffff00, depthTest:false } );
+
+        //------------------------------------
+        // Manage Pool of Meshes
+        this.pool.onNew = this._newSphereMesh.bind( this );
+        
+        //------------------------------------
+        // Make Meshes Draggable using Translation Gizmo
+        this.dragging.init( renderer );
+        this.dragging.onMove = this.onDragMove.bind( this );
+        this.dragging.onStop = this.onDragStop.bind( this );
+
+        //------------------------------------
+        this.dynMesh = new DynamicMesh( UnlitMaterial( "cyan", true ) );
+        this.dynMesh.mesh.material.side = THREE.DoubleSide;
+        renderer.add( this.dynMesh.mesh );
+    }
+
+    initUI(){
+        let loopCnt = 0;
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        Dom.on( "btnAddPnt", "pointerdown", true, e=>this.addPoint() );
+        Dom.on( "btnDelPnt", "pointerdown", true, e=>this.rmPoint() );
+        Dom.on( "btnAddLoop", "pointerdown", true, e=>this.addLoop( "Cut : " + (++loopCnt) ) );
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        this.ui.selLoop = Dom.on( "selLoops", "change", true, e=>this.selectLoop( e.srcElement.value ) );
+        this.ui.addLoopOption = ( name, id, autoSel=false )=>{
+            Dom.addOption( this.ui.selLoop, name, id );
+            if( autoSel ) this.ui.selLoop.selectedIndex = this.ui.selLoop.options.length - 1;
+        };
+
+        this.ui.addLoopOption( this.selectedLoop.name, this.selectedLoop.id );
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        return this;
+    }
+    // #endregion ///////////////////////////////////////////////////////
+
+    // #region PRIVATE METHODS
+    _newSphereMesh(){
+        let mesh = new THREE.Mesh( this.meshGeo, this.meshMat );
+        mesh.userData.xzOnly    = true;
+        mesh.renderOrder        = 10;
+        return mesh;
+    }
+    // #endregion ///////////////////////////////////////////////////////
+
+    // #region PUBLIC METHODS
+    addPoint( loopId=null, pos=null ){
+        let loop = (loopId)? this.loops.get( loopId ) : this.selectedLoop;
+
+        if( !loop ){
+            console.log( "Editor.addPoint : Can't find EdgeLoop of ID - ", loopId );
+            return this;
+        }
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        if( !pos && loop.points.length > 1 ){
+            let i = loop.points.length - 1;
+            pos = Vec3.fromLerp( loop.lastPoint().pos, loop.firstPoint().pos, 0.5 );
+        }
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        loop.addPos( pos );
+        this.selectLoop( this.selectedLoop.id ); // Reload Points, TODO - Not a good way to do it.
+        return this;
+    }
+
+    rmPoint(){
+        /*
+        let mesh = this.dragging.getSelected();
+        if( !mesh ) return;
+
+        this.dragging.remove( mesh ).deselect();    // Remove From Draggables and run deselection
+        this.renderer.remove( mesh );               // Remove it from rendering list
+        this.pool.recycle( mesh );                  // Save mesh back to the pool
+        */
+    }
+
+    selectLoop( loopId=null ){
+        let p, el = this.loops.get( loopId || this.mainLoopId );
+        
+        this.clearDragPoints();
+        this.selectedLoop = el;
+
+        for( p of el.points ) this.addDragPoint( p.id, p.pos );
+    }
+
+    addLoop( name="EdgeLoop" ){
+        let el = new EdgeLoop( name );
+        this.loops.set( el.id, el );
+        this.ui.addLoopOption( el.name, el.id, true );
+        this.selectLoop( el.id );
+    }
+    // #endregion ///////////////////////////////////////////////////////
+
+    // #region EVENTS
+    onDragStop( o ){ console.log( "DragStop" ); this.updateDynamicMesh(); }
+    onDragMove( o ){
+        if( o.userData.xzOnly ){
+            o.position.y = 0;
+        }else{
+            o.position.x = 0;
+            o.position.z = 0;
+            if( o.position.y < 0 ) o.position.y = 0;
+        }
+
+        this.selectedLoop.updatePos( o.userData.pntId, o.position );
+    }
+    // #endregion ///////////////////////////////////////////////////////
+
+    // #region MANAGE DRAGGABLE POINTS
+    addDragPoint( id, pos=null ){
+        let mesh = this.pool.get();
+        mesh.userData.pntId = id;
+        if( pos ) mesh.position.fromArray( pos );
+
+        this.renderer.add( mesh );  // Render it
+        this.dragging.add( mesh );  // Make of Draggable Meshes
+        return this;
+    }
+
+    removeDragPoint( m ){
+        this.dragging.remove( m );
+        this.renderer.remove( m );
+        this.pool.recycle( m );
+        return this;
+    }
+
+    clearDragPoints(){
+        let i, m, ary = this.dragging.items;
+        this.dragging.deselect();
+        for( i=ary.length-1; i >= 0; i-- ){
+            this.removeDragPoint( this.dragging.items[ i ] );
+        }
+        return this;
+    }
+    // #endregion ///////////////////////////////////////////////////////
+
+    // #region EARCUT
+
+    updateDynamicMesh(){
+        let loop, i=0;
+        let verts = [];
+        let holes = [];
+
+        for( [,loop] of this.loops ){
+            if( loop.pointCount < 3 ) continue; // Need at least 3 points to define a triangle
+
+            if( i != 0 ) holes.push( this.verts.length / 3 );
+            loop.getFlatArray( verts );
+            i++;
+        }
+
+
+        let geo = Earcut.extrude( verts, holes, [0,1,0] );
+        console.log( geo );
+
+        if( geo ) this.dynMesh.rebuild( geo );
+        //console.log( verts, holes );
+    }
+
+    // #endregion ///////////////////////////////////////////////////////
+}
+
+
+//###########################################################################
+
+// General Glue & State Managements
+class Editor{
+
+    // #region MAIN
+    constructor(){
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        this.edgeLoops      = new Map();
+        this.render         = null;
+        this.ui             = null;
+        this._extrudeHeight = 1;
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        this.mainLoop       = new EdgeLoop( "Polygon" );
+        this.currentLoop    = this.mainLoop;
+        this.edgeLoops.set( this.mainLoop.id, this.mainLoop );
+    }
+
+    init( starter, useStartData=false ){
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        this.render = new EditorRenderer( starter, this );
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        this.ui = new EditorUI( this );
+        this.ui.addLoopOption( this.mainLoop.name, this.mainLoop.id, true );
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        if( useStartData ){
+            this.mainLoop.addPos( [ -1, 0, -1 ] );
+            this.mainLoop.addPos( [ -1, 0,  1 ] );
+            this.mainLoop.addPos( [  1, 0,  1 ] );
+            this.mainLoop.addPos( [  1, 0, -1 ] );
+        }
+    }
+    // #endregion ///////////////////////////////////////////////////////
+
+    // #region LOREM
+    showCurrentPoints(){
+        if( !this.currentLoop ) return;
+
+        this.render.clearDragPoints();
+        for( let p of this.currentLoop.points ) this.render.addDragPoint( p.id, p.pos );
+    }
+    // #endregion ///////////////////////////////////////////////////////
+
+    // #region EVENTS
+    onDragPoint( id, pos ){
+        if( this.currentLoop ) this.currentLoop.updatePos( id, pos );
+    }
+
+    onDragStop(){ this.updateDynamicMesh(); }
+    // #endregion ///////////////////////////////////////////////////////
+
+    updateDynamicMesh(){
+        let loop, i=0;
+        let verts = [];
+        let holes = [];
+
+        for( [,loop] of this.edgeLoops ){
+            if( loop.pointCount < 3 ) continue; // Need at least 3 points to define a triangle
+
+            if( i != 0 ) holes.push( verts.length / 3 );
+            loop.getFlatArray( verts );
+            i++;
+        }
+
+        let geo = Earcut.extrude3D( verts, holes, [0,this._extrudeHeight,0] );
+        if( geo ) this.render.rebuildDynamicMesh( geo );
+    }
+
+    addPoint( pos=null ){
+        if( !this.currentLoop ){
+            console.log( "Editor.addPoint : no selected edge loop" );
+            return this;
+        }
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        let loop = this.currentLoop;
+        if( !pos && loop.pointCount > 1 ){
+            pos = Vec3.fromLerp( loop.lastPoint().pos, loop.firstPoint().pos, 0.5 );
+        }
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        let id = loop.addPos( pos );            // Add new Point onto the Edge Loop
+        this.render.addDragPoint( id, pos );    // Update Renderer with new DragPoint
+        this.updateDynamicMesh();               // Update Mesh using new point
+        return this;
+    }
+
+    removePoint(){
+        console.log( "RemovePoint" );
+        if( !this.currentLoop ){
+            console.warn( "Editor.removePoint : no selected edge loop" );
+            return this;
+        }
+
+        if( this.currentLoop.pointCount <= 3 ){
+            console.warn( "Editor.removePoint : loop needs a min of 3 points." );
+            return this;
+        }
+
+        let o = this.render.dragPoints.getSelected();
+        if( o ){
+            this.currentLoop.rmPos( o.userData.pntId );
+            this.showCurrentPoints();
+            this.updateDynamicMesh();
+        }else{
+            console.warn( "Editor.removePoint : No Point is selected. " );
+        }
+        return this;
+    }
+
+    setExtrudeHeight( v ){
+        this._extrudeHeight = v;
+        this.updateDynamicMesh();
+    }
+
+    // #region LOOPS
+    addLoop( name="loop" ){
+        let el = new EdgeLoop( name );                  // Create Edge Loop with a Starting Triangle
+        el.addPos( [ -0.5, 0, -0.5 ] );
+        el.addPos( [ -0.5, 0,  0.5 ] );
+        el.addPos( [  0.5, 0,  0.5 ] );
+
+        this.edgeLoops.set( el.id, el );                // Cache Loop
+        this.ui.addLoopOption( el.name, el.id, true );  // Update UI with new selectable Edge Loop while auto selecting it
+        this.selectLoop( el.id );                       // Tell editor to make this the selected edge loop to work on.
+        this.updateDynamicMesh();
+    }
+
+    removeLoop( id=null ){
+        if( !id && this.currentLoop ) id = this.currentLoop.id;
+        if( !id ){ console.warn( "Editor.removeLoop : No loop selected or available for deleting." ); return; }
+        if( id == this.mainLoop.id ){ console.warn( "Can not delete Polygon Edge Loop, its required." ); return; }
+
+        let el = this.edgeLoops.get( id );
+
+        this.ui.rmLoopOption( el.id );
+        this.edgeLoops.delete( el.id );
+        el.dispose();
+
+        if( this.currentLoop === el ){
+            this.ui.selLoopOption( this.mainLoop.id );
+            this.selectLoop( this.mainLoop.id );
+        }
+
+        this.updateDynamicMesh();
+    }
+
+    selectLoop( id ){
+        let el = this.edgeLoops.get( id );
+        this.currentLoop = el;
+        this.showCurrentPoints();
+    }
+    // #endregion ///////////////////////////////////////////////////////
+}
+
+// Manage the UI Aspect of things
+class EditorUI{
+    constructor( editor ){
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        this.loopCnt    = 0;
+        this.editor     = editor;
+        this.selLoop    = Dom.on( "selLoops", "change", true, e=>editor.selectLoop( e.srcElement.value ) );
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        // Points
+        Dom.on( "btnAddPnt", "pointerdown", true, e=>editor.addPoint() );
+        Dom.on( "btnDelPnt", "pointerdown", true, e=>{
+            if( confirm("Delete Selected Point?" ) ) editor.removePoint();
+        });
+
+        // Loops
+        Dom.on( "btnAddLoop", "pointerdown", true, e=>editor.addLoop( "Cut " + (++this.loopCnt) ) );
+        Dom.on( "btnDelLoop", "pointerdown", true, e=>{
+            if( confirm("Delete Selected Loop?" ) )  editor.removeLoop();
+        });
+
+        // Camera
+        Dom.on( "btnViewY", "pointerdown", true, e=>gApp.set_camera( 0, 90, 8 ) );
+        Dom.on( "btnViewX", "pointerdown", true, e=>gApp.set_camera( 90, 0, 8 ) );
+        Dom.on( "btnViewZ", "pointerdown", true, e=>gApp.set_camera( 0, 0, 8 ) );
+
+        //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        Dom.on( "numHeight", "input", true, e=>editor.setExtrudeHeight( e.detail.value ) );
+    }
+
+    addLoopOption( name, id, autoSel=false ){
+        Dom.addOption( this.selLoop, name, id );
+        if( autoSel ) this.selLoop.selectedIndex = this.selLoop.options.length - 1;
+    }
+
+    rmLoopOption( id ){ Dom.rmOptionByValue( this.selLoop, id ); }
+
+    selLoopOption( id ){
+        let opt = this.selLoop.options;
+        for( let i=0; i < opt.length; i++ ){
+            if( opt[ i ].value == id ){
+                this.selLoop.selectedIndex = i;
+                return;
+            }
+        }
+    }
+}
+
+class EditorRenderer{
+
+    constructor( starter, editor ){
+        this.starter    = starter;
+        this.editor     = editor;
+        this.meshGeo    = new THREE.SphereGeometry( 0.1, 8, 8 );
+        this.meshMat    = new THREE.MeshPhongMaterial( { color:0xffff00, depthTest:false } );
+
+        //------------------------------------
+        // Manage Pool of Meshes
+        this.meshPool       = new ObjectPool();
+        this.meshPool.onNew = this._newSphereMesh.bind( this );
+        
+        //------------------------------------
+        // Make Meshes Draggable using Translation Gizmo
+        this.dragPoints = new Draggables();
+        this.dragPoints.init( starter );
+        this.dragPoints.onMove = this._onDragMove.bind( this );
+        this.dragPoints.onStop = this._onDragStop.bind( this );
+
+        //------------------------------------
+        this.dynMesh = new DynamicMesh( UnlitMaterial( "cyan", true ) );
+        this.dynMesh.mesh.material.side = THREE.DoubleSide;
+        starter.add( this.dynMesh.mesh );
+    }
+
+    _newSphereMesh(){
+        let mesh = new THREE.Mesh( this.meshGeo, this.meshMat );
+        mesh.userData.xzOnly    = true;
+        mesh.renderOrder        = 10;
+        return mesh;
+    }
+
+    rebuildDynamicMesh( geo ){ this.dynMesh.rebuild( geo ); }
+
+    // #region EVENTS
+    _onDragStop( o ){ this.editor.onDragStop(); }
+    _onDragMove( o ){
+        if( o.userData.xzOnly ){
+            o.position.y = 0;
+        }else{
+            o.position.x = 0;
+            o.position.z = 0;
+            if( o.position.y < 0 ) o.position.y = 0;
+        }
+
+        this.editor.onDragPoint( o.userData.pntId, o.position );
+    }
+    // #endregion ///////////////////////////////////////////////////////
+
+    // #region MANAGE DRAGGABLE POINTS
+    addDragPoint( id, pos=null ){
+        let mesh = this.meshPool.get();
+        mesh.userData.pntId = id;
+        if( pos ) mesh.position.fromArray( pos );
+
+        this.starter.add( mesh );       // Render it
+        this.dragPoints.add( mesh );    // Make it Draggable Meshes
+        return this;
+    }
+
+    removeDragPoint( m ){
+        this.dragPoints.remove( m );
+        this.starter.remove( m );
+        this.meshPool.recycle( m );
+        return this;
+    }
+
+    clearDragPoints(){
+        let i, m, ary = this.dragPoints.items;
+        this.dragPoints.deselect();
+        for( i=ary.length-1; i >= 0; i-- ){
+            this.removeDragPoint( this.dragPoints.items[ i ] );
+        }
+        return this;
+    }
+    // #endregion ///////////////////////////////////////////////////////
+}
+
+
+
+</script>
+
+<!---->
+<prop-panel-btncont open="true" panelWidth="300px">
+    <prop-panel label="" foot="Editor Options">
+            <prop-row label="Loops"><select id="selLoops"></select></prop-row>
+            <prop-row label="Height"><drag-number-input id="numHeight" min="0.1" step="0.1" value="1"></drag-number-input></prop-row>
+            <!--            <prop-row label="Scale"><slide-input id="UScale" min="0.1" max="30" value="5"></slide-input></prop-row>
+            <prop-row label="Step"><range-input id="UStep" min="0" max="1" minValue="0" maxValue="1"></range-input></prop-row>
+            <prop-row label="Remap01"><check-button id="URemap" class="onoff" on="false"></check-button></prop-row>
+            -->
+
+            <prop-row label="Points">
+                <flex-stack>
+                    <button id="btnAddPnt"><i class="icoPlus icoBlack ico15"></i></button>
+                    <button id="btnDelPnt"><i class="icoMinus icoBlack ico15"></i></button>
+                </flex-stack>
+            </prop-row>
+            <prop-row label="Loops">
+                <flex-stack>
+                    <button id="btnAddLoop"><i class="icoPlus icoBlack ico15"></i></button>
+                    <button id="btnDelLoop"><i class="icoMinus icoBlack ico15"></i></button>
+                </flex-stack>
+            </prop-row>
+            <prop-row label="Camera">
+                <flex-stack>
+                    <button id="btnViewY">Top</button>
+                    <button id="btnViewX">Left</button>
+                    <button id="btnViewZ">Front</button>
+                </flex-stack>
+            </prop-row>
+    </prop-panel>
+</prop-panel-btncont>
+
+<style>
+    /*
+    https://westonganger.com/posts/change-the-fill-color-of-svg-with-css
+    https://fontawesome.com/v5.15/icons?d=gallery&p=2&m=free
+    https://base64.guru/converter
+    <svg focusable="false" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><path d="M416 208H272V64c0-17.67-14.33-32-32-32h-32c-17.67 0-32 14.33-32 32v144H32c-17.67 0-32 14.33-32 32v32c0 17.67 14.33 32 32 32h144v144c0 17.67 14.33 32 32 32h32c17.67 0 32-14.33 32-32V304h144c17.67 0 32-14.33 32-32v-32c0-17.67-14.33-32-32-32z"></path></svg>
+    */
+    .icoWhite{ background-color:white; }
+    .icoBlack{ background-color:black; }
+    .ico15{ width:15px; height:15px; }
+    .icoPlus{ display:inline-block; -webkit-mask: url("data:image/svg+xml;base64,PHN2ZyBmb2N1c2FibGU9ImZhbHNlIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0NDggNTEyIj48cGF0aCBkPSJNNDE2IDIwOEgyNzJWNjRjMC0xNy42Ny0xNC4zMy0zMi0zMi0zMmgtMzJjLTE3LjY3IDAtMzIgMTQuMzMtMzIgMzJ2MTQ0SDMyYy0xNy42NyAwLTMyIDE0LjMzLTMyIDMydjMyYzAgMTcuNjcgMTQuMzMgMzIgMzIgMzJoMTQ0djE0NGMwIDE3LjY3IDE0LjMzIDMyIDMyIDMyaDMyYzE3LjY3IDAgMzItMTQuMzMgMzItMzJWMzA0aDE0NGMxNy42NyAwIDMyLTE0LjMzIDMyLTMydi0zMmMwLTE3LjY3LTE0LjMzLTMyLTMyLTMyeiI+PC9wYXRoPjwvc3ZnPg==") no-repeat 100% 100%; }
+    .icoMinus{ display:inline-block; -webkit-mask: url("data:image/svg+xml;base64,PHN2ZyBmb2N1c2FibGU9ImZhbHNlIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0NDggNTEyIj48cGF0aCBkPSJNNDE2IDIwOEgzMmMtMTcuNjcgMC0zMiAxNC4zMy0zMiAzMnYzMmMwIDE3LjY3IDE0LjMzIDMyIDMyIDMyaDM4NGMxNy42NyAwIDMyLTE0LjMzIDMyLTMydi0zMmMwLTE3LjY3LTE0LjMzLTMyLTMyLTMyeiI+PC9wYXRoPjwvc3ZnPg==") no-repeat 100% 100%; }
+</style>
+
+</body></html>

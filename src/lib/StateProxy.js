@@ -1,9 +1,10 @@
-/*
+/**
+@example
 let myData = { woot:0 };
 
 let state = StateProxy.new( myData );
-state.$.dynamicProperties = false;
 state.$
+    .useDynamicProperties( false )
     .converter( "woot", "int" )
     .on( "wootChange", (e)=>{ console.log( "wootChange", e.detail ) } );
 
@@ -12,7 +13,7 @@ state.woot = "yo";      // Converter Prevents this from being Saved since it pro
 
 console.log( state.woot );
 */
-    
+
 class StateProxy{
 
     // #region STATIC
@@ -20,16 +21,15 @@ class StateProxy{
     // #endregion ////////////////////////////////////////////////////////////
 
     // #region MAIN
-    emitter           = new EventTarget();
-    converters        = new Map();
-    dynamicProperties = false;
-    data              = null;
-    
-    constructor( data=null ){
-        this.data = data;
+    constructor( data ){
+        this._emitter           = new EventTarget();
+        this._converters        = new Map();
+        this._dynamicProperties = false;
+        this._data              = data;
     }
 
-    getData(){ return this.data; }
+    getData(){ return this._data; }
+    useDynamicProperties( v ){ this._dynamicProperties = v; return this; }
     // #endregion ////////////////////////////////////////////////////////////
 
     // #region PROXY TRAPS
@@ -45,11 +45,11 @@ class StateProxy{
 
         //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         if( prop == "$" )                                    return false;
-        if( !this.dynamicProperties && !( prop in target ) ) return false;
+        if( !this._dynamicProperties && !( prop in target ) ) return false;
 
         //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        if( this.converters.has( prop ) ){
-            let tuple = this.converters.get( prop )( value );
+        if( this._converters.has( prop ) ){
+            let tuple = this._converters.get( prop )( value );
             if( tuple[ 0 ] == false ) return false;
             value = tuple[ 1 ];
         }
@@ -69,7 +69,7 @@ class StateProxy{
             case "int"      : fn = this._intConverter;     break;
         }
 
-        this.converters.set( propName, fn );
+        this._converters.set( propName, fn );
         return this;
     }
 
@@ -85,12 +85,12 @@ class StateProxy{
     // #endregion ////////////////////////////////////////////////////////////
 
     // #region EVENTS
-    on( evtName, fn ){ this.emitter.addEventListener( evtName, fn ); return this; }
-    off( evtName, fn ){ this.emitter.removeEventListener( evtName, fn ); return this; }
-    once( evtName, fn ){ this.emitter.addEventListener( evtname, fn, { once:true } ); return this; }
+    on( evtName, fn ){ this._emitter.addEventListener( evtName, fn ); return this; }
+    off( evtName, fn ){ this._emitter.removeEventListener( evtName, fn ); return this; }
+    once( evtName, fn ){ this._emitter.addEventListener( evtName, fn, { once:true } ); return this; }
 
     emit( evtName, data ){
-        this.emitter.dispatchEvent( new CustomEvent( evtName, { detail:data, bubbles: false, cancelable:true, composed:false } ) );
+        this._emitter.dispatchEvent( new CustomEvent( evtName, { detail:data, bubbles: false, cancelable:true, composed:false } ) );
         return this;
     }
     // #endregion ////////////////////////////////////////////////////////////

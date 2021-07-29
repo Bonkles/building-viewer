@@ -2,9 +2,8 @@ body {
     margin: 0;
     background-color: #000;
     color: #fff;
-    font-family: Monospace;
-    font-size: 13px;
-    line-height: 24px;
+    font-family: monospace;
+    font-size: 12px;
     overscroll-behavior: none;
 }
 canvas{ display: block; }
